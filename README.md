@@ -2,11 +2,10 @@
 
 ## Setup
 
-Install uv: https://docs.astral.sh/uv/getting-started/installation/
+Install uv: https://docs.astral.sh/uv/getting-started/installation/ , or through pacman or brew
 
 Then:
 ```bash
-git clone <repo-url>
 cd SmartEVAnalysis
 uv sync
 ```
