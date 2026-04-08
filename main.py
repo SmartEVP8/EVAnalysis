@@ -1,28 +1,51 @@
+import logging
+import sys
+import tomllib
 import polars as pl
-import altair as alt
-import webbrowser
-import os
+from pathlib import Path
 
-def main():
-    data_path = "userdata.parquet"
-    df = pl.read_parquet(data_path).select("salary").drop_nulls()
+from template.models import station_snapshot, charger_snapshot
+from template.analysis import charger_analysis, station_analysis
 
-    chart = alt.Chart(df).mark_bar().encode(
-        alt.X("salary:Q", bin=alt.Bin(maxbins=50), title="Salary"),
-        alt.Y("count()", title="Count"),
-        tooltip=[
-            alt.Tooltip("salary:Q", bin=alt.Bin(maxbins=50), title="Salary Range"),
-            alt.Tooltip("count()", title="Count"),
-        ]
-    ).properties(
-        title="Salary Distribution",
-        width=700,
-        height=400,
-    ).interactive()
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s  %(levelname)-8s  %(message)s",
+    datefmt="%H:%M:%S",
+)
 
-    html_path = os.path.abspath("chart.html")
-    chart.save(html_path)
-    webbrowser.open(f"file://{html_path}")
+logger = logging.getLogger(__name__)
+CONFIG_PATH = Path(__file__).parent / "config.toml"
+
+
+def load_config() -> dict:
+    with open(CONFIG_PATH, "rb") as f:
+        return tomllib.load(f)
+
+
+def latest_run(perkuet_dir: Path) -> Path:
+    runs = [p for p in perkuet_dir.iterdir() if p.is_dir()]
+    if not runs:
+        raise FileNotFoundError(f"No run folders found in {perkuet_dir}")
+    return max(runs, key=lambda p: p.stat().st_mtime)
+
+
+def main() -> None:
+    toml = load_config()
+    base = CONFIG_PATH.parent
+    perkuet_dir = (base / toml["paths"]["perkuet_dir"]).resolve()
+
+    run_dir = Path(sys.argv[1]) if len(sys.argv) > 1 else latest_run(perkuet_dir)
+    logger.info("Loading run: %s", run_dir.name)
+
+    stations = station_snapshot.load(run_dir / "StationSnapshotMetric.parquet")
+    chargers = charger_snapshot.load(run_dir / "ChargerSnapshotMetric.parquet")
+
+    # Analysis
+    charger_summary = charger_analysis.summary(chargers)
+    station_summary = station_analysis.summary(stations, chargers)
+    print(charger_summary)
+    print(station_summary)
+
 
 if __name__ == "__main__":
     main()
