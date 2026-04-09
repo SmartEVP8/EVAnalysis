@@ -11,6 +11,8 @@ COLORS = {
     "revenue": "#66bb6a",
 }
 
+HEATMAP_COLORS = ["#12321d", "#499f56", "#ffca3a", "#ff7823", "#fe0008"]
+
 COLUMN_WIDTH = 300 
 GRID_SPACING = 40
 
@@ -79,12 +81,12 @@ def heatmap(data):
         alt.Chart(data)
         .mark_rect()
         .encode(
-            x=alt.X("utilization:Q", bin=alt.Bin(maxbins=40), title="Utilization"),
-            y=alt.Y("queue:Q", bin=alt.Bin(maxbins=40), title="Queue Size"),
+            x=alt.X("utilization:Q", bin=alt.Bin(maxbins=60), title="Utilization"),
+            y=alt.Y("queue:Q", bin=alt.Bin(maxbins=60), title="Queue Size"),
             color=alt.Color(
                 "count()",
-                scale=alt.Scale(scheme="plasma"), # Other color schemes can be found at https://vega.github.io/vega/docs/schemes/
-                title="Density",
+                scale=alt.Scale(range=HEATMAP_COLORS), # Color schemes can be found at https://vega.github.io/vega/docs/schemes/
+                title="Business Density",
                 legend=alt.Legend(
                     orient="bottom", 
                     direction="horizontal", 
