@@ -79,18 +79,26 @@ def heatmap(data):
         alt.Chart(data)
         .mark_rect()
         .encode(
-            alt.X("utilization:Q", bin=alt.Bin(maxbins=100), title="Utilization"),
-            alt.Y("queue:Q", bin=alt.Bin(maxbins=100), title="Queue Size"),
-            
+            x=alt.X("utilization:Q", bin=alt.Bin(maxbins=40), title="Utilization"),
+            y=alt.Y("queue:Q", bin=alt.Bin(maxbins=40), title="Queue Size"),
             color=alt.Color(
-                "count()", 
-                scale=alt.Scale(scheme="viridis"), 
-                title="Frequency"
-            ),
-            tooltip=["count()"]
+                "count()",
+                scale=alt.Scale(scheme="plasma"), # Other color schemes can be found at https://vega.github.io/vega/docs/schemes/
+                title="Density",
+                legend=alt.Legend(
+                    orient="bottom", 
+                    direction="horizontal", 
+                    gradientLength=full_width * 0.35,
+                    title="Concentration of events",
+                    titleColor="#e0e0e0",
+                    labelColor="#bbbbbb",
+                    titleFontSize=14,
+                    titlePadding=10
+                )
+            )
         )
         .properties(
-            title="Density Map: Utilization vs Queue",
+            title="Density Heatmap",
             width=full_width,
             height=350
         )
@@ -132,6 +140,7 @@ def build_dashboard():
             spacing=50,
             center=True 
         )
+        .resolve_legend(color='independent')
         .properties(
             title=alt.TitleParams(
                 "Operational Dashboard",
