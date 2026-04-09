@@ -1,74 +1,49 @@
 import polars as pl
 
 
-def utilization_percentiles(chargers: pl.DataFrame) -> pl.DataFrame:
+def utilization(chargers: pl.DataFrame) -> pl.DataFrame:
     """
-    Aggregates charger-level utilization up to station level by computing the
-    mean utilization across all chargers at the station for each snapshot,
-    then computing percentiles of those per-snapshot means.
+    Per-station utilization aggregated across all snapshots and chargers.
+
+    For each snapshot, computes the mean utilization across all chargers at
+    that station. Then aggregates those per-snapshot means into:
+      - MeanUtilization: mean of per-snapshot means
+      - P50, P75, P90: percentiles of per-snapshot means
     """
     return (
         chargers
         .group_by("StationId", "SimTime")
-        .agg(pl.col("Utilization").mean().alias("MeanChargerUtilization"))
+        .agg(pl.col("Utilization").mean().alias("SnapshotMeanUtilization"))
         .group_by("StationId")
         .agg(
-            pl.col("MeanChargerUtilization").quantile(0.50).alias("P50"),
-            pl.col("MeanChargerUtilization").quantile(0.75).alias("P75"),
-            pl.col("MeanChargerUtilization").quantile(0.90).alias("P90"),
-            pl.col("MeanChargerUtilization").mean().alias("Mean"),
+            pl.col("SnapshotMeanUtilization").mean().alias("MeanUtilization"),
+            pl.col("SnapshotMeanUtilization").quantile(0.50).alias("P50"),
+            pl.col("SnapshotMeanUtilization").quantile(0.75).alias("P75"),
+            pl.col("SnapshotMeanUtilization").quantile(0.90).alias("P90"),
         )
         .sort("StationId")
     )
 
 
-def queue_size_percentiles(stations: pl.DataFrame) -> pl.DataFrame:
+def queue_size(stations: pl.DataFrame) -> pl.DataFrame:
     """
-    Uses TotalQueueSize from StationSnapshotMetric, which is already the
-    sum of all charger queue sizes at that station (computed by SmartEV).
+    Per-station average queue size across all snapshots.
+
+    TotalQueueSize is already the sum of all charger queue sizes at the
+    station per snapshot (computed by C#). This divides by TotalChargers
+    to get the mean queue size per charger at that station, then averages
+    across snapshots.
     """
     return (
         stations
-        .group_by("StationId")
-        .agg(
-            pl.col("TotalQueueSize").quantile(0.50).alias("P50"),
-            pl.col("TotalQueueSize").quantile(0.75).alias("P75"),
-            pl.col("TotalQueueSize").quantile(0.90).alias("P90"),
-            pl.col("TotalQueueSize").mean().alias("Mean"),
-            pl.col("TotalQueueSize").max().alias("Max"),
-        )
-        .sort("StationId")
-    )
-
-
-def active_chargers_per_snapshot(chargers: pl.DataFrame) -> pl.DataFrame:
-    """
-    Per station per snapshot: how many chargers were active (Utilization > 0)
-    and what fraction of total chargers that represents.
-    """
-    per_snapshot = (
-        chargers
-        .group_by("StationId", "SimTime")
-        .agg(
-            (pl.col("Utilization") > 0).sum().alias("ActiveChargers"),
-            pl.col("ChargerId").count().alias("TotalChargers"),
-        )
         .with_columns(
-            (pl.col("ActiveChargers") / pl.col("TotalChargers")).alias("ActiveFraction")
+            (pl.col("TotalQueueSize") / pl.col("TotalChargers")).alias("MeanChargerQueueSize")
         )
-    )
-
-    return (
-        per_snapshot
         .group_by("StationId")
         .agg(
-            pl.col("ActiveChargers").quantile(0.50).alias("ActiveCount_P50"),
-            pl.col("ActiveChargers").quantile(0.75).alias("ActiveCount_P75"),
-            pl.col("ActiveChargers").quantile(0.90).alias("ActiveCount_P90"),
-            pl.col("ActiveFraction").quantile(0.50).alias("ActiveFraction_P50"),
-            pl.col("ActiveFraction").quantile(0.75).alias("ActiveFraction_P75"),
-            pl.col("ActiveFraction").quantile(0.90).alias("ActiveFraction_P90"),
-            pl.col("TotalChargers").first().alias("TotalChargers"),
+            pl.col("MeanChargerQueueSize").mean().alias("MeanQueueSize"),
+            pl.col("TotalQueueSize").mean().alias("MeanTotalQueueSize"),
+            pl.col("TotalQueueSize").max().alias("MaxTotalQueueSize"),
         )
         .sort("StationId")
     )
@@ -76,10 +51,10 @@ def active_chargers_per_snapshot(chargers: pl.DataFrame) -> pl.DataFrame:
 
 def reservation_stats(stations: pl.DataFrame) -> pl.DataFrame:
     """
-    Total reservations, total cancellations, and cancellation rate per station
-    across the full simulation.
+    Per-station reservation and cancellation totals across the full simulation.
 
-    CancellationRate = totalCancelled / totalRequested.
+    CancellationRate = TotalCancellations / TotalReservations.
+    Stations with zero reservations get a rate of 0.
     """
     return (
         stations
@@ -98,18 +73,22 @@ def reservation_stats(stations: pl.DataFrame) -> pl.DataFrame:
     )
 
 
-def price_stats(stations: pl.DataFrame) -> pl.DataFrame:
+def charging_revenue(stations: pl.DataFrame) -> pl.DataFrame:
     """
-    Mean, min, and max energy price per station across all snapshots.
-    Price varies over sim time as energy prices fluctuate.
+    Per-station total charging revenue across the full simulation.
+
+    For each snapshot: revenue = TotalDeliveredKWh x Price (DKK/kWh).
+    Summed across all snapshots per station.
     """
     return (
         stations
+        .with_columns(
+            (pl.col("TotalDeliveredKWh") * pl.col("Price")).alias("SnapshotRevenue")
+        )
         .group_by("StationId")
         .agg(
-            pl.col("Price").mean().alias("MeanPrice"),
-            pl.col("Price").min().alias("MinPrice"),
-            pl.col("Price").max().alias("MaxPrice"),
+            pl.col("SnapshotRevenue").sum().alias("TotalRevenueDKK"),
+            pl.col("TotalDeliveredKWh").sum().alias("TotalDeliveredKWh"),
         )
         .sort("StationId")
     )
@@ -117,25 +96,21 @@ def price_stats(stations: pl.DataFrame) -> pl.DataFrame:
 
 def summary(stations: pl.DataFrame, chargers: pl.DataFrame) -> pl.DataFrame:
     """
-    Combined per-station summary across all metrics.
-    Joins charger-derived metrics with station-level metrics.
+    Combined per-station summary: utilization, queue size, reservations, revenue.
     """
-    util = utilization_percentiles(chargers).rename({
-        "P50": "Util_P50", "P75": "Util_P75", "P90": "Util_P90", "Mean": "Util_Mean",
+    util = utilization(chargers).rename({
+        "P50": "Util_P50",
+        "P75": "Util_P75",
+        "P90": "Util_P90",
     })
-    queue = queue_size_percentiles(stations).rename({
-        "P50": "Queue_P50", "P75": "Queue_P75", "P90": "Queue_P90",
-        "Mean": "Queue_Mean", "Max": "Queue_Max",
-    })
-    activity = active_chargers_per_snapshot(chargers)
+    queue = queue_size(stations)
     reservations = reservation_stats(stations)
-    price = price_stats(stations)
+    revenue = charging_revenue(stations)
 
     return (
         util
         .join(queue, on="StationId")
-        .join(activity, on="StationId")
         .join(reservations, on="StationId")
-        .join(price, on="StationId")
+        .join(revenue, on="StationId")
         .sort("StationId")
     )

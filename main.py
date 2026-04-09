@@ -1,11 +1,11 @@
 import logging
 import sys
 import tomllib
-import polars as pl
 from pathlib import Path
 
 from template.models import station_snapshot, charger_snapshot
 from template.analysis import charger_analysis, station_analysis
+from visualisation.dashboard import build_dashboard
 
 logging.basicConfig(
     level=logging.INFO,
@@ -45,6 +45,11 @@ def main() -> None:
     station_summary = station_analysis.summary(stations, chargers)
     print(charger_summary)
     print(station_summary)
+
+    # Visualisation
+    dashboard = build_dashboard()
+    dashboard.show()
+    print("Dashboard built successfully.")
 
 
 if __name__ == "__main__":
