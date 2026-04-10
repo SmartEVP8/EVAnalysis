@@ -25,7 +25,7 @@ def infer_run_id(parquet_path: Path) -> str:
     return parquet_path.parent.name
 
 
-def load_and_enrich(parquet_path: Path) -> pl.DataFrame:
+def add_day_columns_to_parquet(parquet_path: Path) -> pl.DataFrame:
     """
     Read a parquet file and attach derived columns.
 

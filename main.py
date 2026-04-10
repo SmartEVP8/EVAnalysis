@@ -11,7 +11,8 @@ import sys
 import tomllib
 from pathlib import Path
 
-from analysis.raw_metrics_analyser import analyse_station, analyse_charger
+from analysis.metrics_analyser.charger_metrics_analyser import analyse_charger
+from analysis.metrics_analyser.station_metrics_analyser import analyse_station
 
 CONFIG_PATH = Path(__file__).parent / "config.toml"
 
