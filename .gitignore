@@ -1,5 +1,7 @@
 .venv
 .idea
 __pycache__
+__init__.py
 *.svg
 .ipynb_checkpoints/
+runs/*
