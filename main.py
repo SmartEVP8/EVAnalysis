@@ -1,14 +1,10 @@
 """
 main.py
--------
-Entry point for the SmartEV analysis pipeline.
 
 Reads the parquet root directory from config.toml.
 
-Usage
------
-    python main.py              # process the most recently modified run
-    python main.py <uuid>       # process a specific run by its UUID
+python main.py              # process the most recently modified run
+python main.py <uuid>       # process a specific run by its UUID
 """
 
 import sys
