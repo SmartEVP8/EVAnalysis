@@ -15,6 +15,9 @@ from analysis.raw_metrics_analyser import analyse_station, analyse_charger
 
 CONFIG_PATH = Path(__file__).parent / "config.toml"
 
+RUNS_DIR = Path(__file__).parent / "runs"
+RUNS_DIR.mkdir(exist_ok=True)
+
 STATION_FILENAME = "StationSnapshotMetric.parquet"
 CHARGER_FILENAME = "ChargerSnapshotMetric.parquet"
 
