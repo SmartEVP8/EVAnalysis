@@ -13,6 +13,7 @@ from pathlib import Path
 
 from analysis.metrics_analyser.charger_metrics_analyser import analyse_charger
 from analysis.metrics_analyser.station_metrics_analyser import analyse_station
+from analysis.outlier_analyser.outlier_analyser import detect_charger_outliers, detect_station_outliers
 
 CONFIG_PATH = Path(__file__).parent / "config.toml"
 
@@ -79,6 +80,10 @@ def main() -> None:
         analyse_charger(charger_path, run_id)
     else:
         print(f"[warn] {CHARGER_FILENAME} not found, skipping charger analysis.")
+
+
+    detect_station_outliers(run_id)
+    detect_charger_outliers(run_id)
 
     print("\nAll done.")
 

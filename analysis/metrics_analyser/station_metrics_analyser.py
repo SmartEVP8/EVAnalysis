@@ -10,7 +10,7 @@ Station-level metrics:
 
 Results are written to:
     runs/{run_id}/analysis/station_snapshots.parquet
-    runs/{run_id}/percentiles/station/station_percentiles_{weekday}.parquet
+    runs/{run_id}/percentiles/station/station_percentiles_{weekday}_{day}.parquet
 """
 
 from pathlib import Path
@@ -24,7 +24,6 @@ PERCENTILES = [0.25, 0.50, 0.75, 0.90, 0.95]
 
 
 def analyse_station(parquet_path: Path, run_id: str) -> None:
-    print(f"\n[Station] Analysing {parquet_path.name}...")
     df = add_day_columns_to_parquet(parquet_path)
     validate_schema(df, STATION_SCHEMA, "StationSnapshotMetric")
 
@@ -47,14 +46,13 @@ def analyse_station(parquet_path: Path, run_id: str) -> None:
     out_analysis = OUTPUT_ROOT / run_id / "analysis"
     out_analysis.mkdir(parents=True, exist_ok=True)
     snapshot_df.sort(["StationId", "day", "time_of_day"]).write_parquet(out_analysis / "station_snapshots.parquet")
-    print(f"  Saved station_snapshots.parquet  ({len(snapshot_df)} rows)")
 
-    # Percentile files per weekday
+    # Percentile files per day.
     out_percentiles = OUTPUT_ROOT / run_id / "percentiles" / "station"
     out_percentiles.mkdir(parents=True, exist_ok=True)
 
-    for weekday_name, group_df in snapshot_df.group_by("weekday_name"):
-        weekday_name = weekday_name[0].lower()
+    for (day, weekday_name), group_df in snapshot_df.group_by(["day", "weekday_name"]):
+        weekday_name_lower = weekday_name.lower()
         percentile_df = (
             group_df.group_by("StationId")
             .agg(
@@ -67,6 +65,5 @@ def analyse_station(parquet_path: Path, run_id: str) -> None:
             .sort("StationId")
         )
 
-        out_path = out_percentiles / f"station_percentiles_{weekday_name}.parquet"
-        percentile_df.write_parquet(out_path)
-        print(f"  Saved station_percentiles_{weekday_name}.parquet  ({len(percentile_df)} rows)")
+        filename = f"station_percentiles_{weekday_name_lower}_{day}.parquet"
+        percentile_df.write_parquet(out_percentiles / filename)

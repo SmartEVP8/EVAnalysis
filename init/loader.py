@@ -15,8 +15,9 @@ SIMULATION_START_DOW = 0
 WEEKDAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday",
                  "Thursday", "Friday", "Saturday"]
 
+MS_PER_SECOND = 1_000
 SECONDS_PER_DAY = 86_400
-
+MS_PER_DAY = SECONDS_PER_DAY * MS_PER_SECOND
 
 def infer_run_id(parquet_path: Path) -> str:
     """
@@ -38,8 +39,8 @@ def add_day_columns_to_parquet(parquet_path: Path) -> pl.DataFrame:
     df = pl.read_parquet(parquet_path)
 
     df = df.with_columns([
-        (pl.col("SimTime") // SECONDS_PER_DAY).alias("day").cast(pl.Int32),
-        (pl.col("SimTime") % SECONDS_PER_DAY).alias("time_of_day").cast(pl.Int32),
+        (pl.col("SimTime") // MS_PER_DAY).alias("day").cast(pl.Int32),
+        ((pl.col("SimTime") % MS_PER_DAY) // MS_PER_SECOND).alias("time_of_day").cast(pl.Int32),
     ])
 
     df = df.with_columns([
