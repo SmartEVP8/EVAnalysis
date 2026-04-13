@@ -1,6 +1,6 @@
 """
-Identifies statistical outliers by comparing each entity's percentile values
-against the mean and standard deviation of all entities for the same weekday.
+Identifies statistical outliers by analyzing the distribution of station and charger
+metrics across all stations/chargers for each day and weekday.
 
 An outlier is defined as a value that falls outside the fences computed using the
 IQR method:
