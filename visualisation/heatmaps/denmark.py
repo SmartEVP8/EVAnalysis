@@ -10,8 +10,8 @@ Coordinate order throughout this module: (lat, lon).
 from dataclasses import dataclass
 
 import numpy as np
+import rasterio.features
 import geopandas as gpd
-import shapely
 
 LAT_MIN = 54.50
 LAT_MAX = 57.80
@@ -77,26 +77,33 @@ def load_denmark_boundary() -> gpd.GeoDataFrame:
 
 def build_land_mask(grid: DenmarkGrid) -> np.ndarray:
     """
-    Return a boolean (height, width) mask - True where the pixel is land.
-
-    Uses a proper point-in-polygon test via geopandas + shapely.
-    Falls back to an all-True mask if the download or test fails.
+    Fast rasterized land mask (NO shapely per-pixel operations).
     """
     try:
-        return _land_mask_geopandas(grid)
+        return _land_mask_raster(grid)
     except Exception as e:
         import warnings
-        warnings.warn(f"Land mask build failed ({e}), falling back to all-land mask.")
+        warnings.warn(f"Land mask failed ({e}), falling back to all-land mask.")
         return np.ones((grid.height, grid.width), dtype=bool)
 
 
-def _land_mask_geopandas(grid: DenmarkGrid) -> np.ndarray:
+def _land_mask_raster(grid: DenmarkGrid) -> np.ndarray:
     dk = load_denmark_boundary()
     dk_union = dk.geometry.union_all()
-   
-    mask_flat = shapely.contains_xy(
-        dk_union,
-        grid.lon_grid.ravel(),
-        grid.lat_grid.ravel(),
+
+    transform = rasterio.transform.from_bounds(
+        grid.lon_min, grid.lat_min,
+        grid.lon_max, grid.lat_max,
+        grid.width, grid.height
     )
-    return mask_flat.reshape(grid.height, grid.width)
+
+    mask = rasterio.features.rasterize(
+        [(dk_union, 1)],
+        out_shape=(grid.height, grid.width),
+        transform=transform,
+        fill=0,
+        dtype=np.uint8,
+        all_touched=True,
+    )
+
+    return np.flipud(mask.astype(bool))

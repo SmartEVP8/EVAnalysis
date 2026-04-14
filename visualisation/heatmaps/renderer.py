@@ -1,11 +1,13 @@
 import logging
 from pathlib import Path
+
 import numpy as np
 import matplotlib.pyplot as plt
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from tqdm import tqdm
+
 from .denmark import DenmarkGrid, build_land_mask, load_denmark_boundary
-from .idw import interpolate_grid
+from .smooth import gaussian_splat
 from .loader import HeatmapDataset
 
 logger = logging.getLogger(__name__)
@@ -18,15 +20,11 @@ METRICS: list[tuple[str, str]] = [
 METRIC_CONFIG: dict[str, dict] = {
     "queue_size": {
         "cmap": "magma",
-        "vmin": 0.0,
-        "vmax": None,
-        "colorbar_label": "Avg queue size (vehicles)",
+        "colorbar_label": "Queue size (normalized 0–1)",
     },
     "utilization": {
         "cmap": "magma",
-        "vmin": 0.0,
-        "vmax": 1.0,
-        "colorbar_label": "Utilization (0 – 1)",
+        "colorbar_label": "Utilization (0–1)",
     },
 }
 
@@ -40,12 +38,19 @@ _METRIC_DISPLAY_NAMES: dict[str, str] = {
 BG = "#0b0f14"
 
 
+def normalize_0_1(raster: np.ndarray) -> np.ndarray:
+    """
+    Hard clamp into [0, 1].
+    Assumes input is already conceptually normalized or bounded.
+    """
+    raster = np.nan_to_num(raster, nan=0.0)
+    return np.clip(raster, 0.0, 1.0)
+
+
 def decode_snapshot(snapshot_id: int) -> tuple[int, str]:
     """
-    Decode a snapshot id into (simulation_day, time_string).
-
     snapshot_id = day * 1_000_000 + time_of_day_ms
-    Returns the day index and a "HH:MM" string.
+    Returns (day, "HH:MM")
     """
     day = snapshot_id // 1_000_000
     time_of_day = snapshot_id % 1_000_000
@@ -58,15 +63,12 @@ def decode_snapshot(snapshot_id: int) -> tuple[int, str]:
 
 
 def format_title(metric_name: str, snapshot_id: int) -> str:
-    """
-    Build a human-readable title string.
-
-    Format: "{Day of week}, Day {X} of simulation, {HH:MM}, {Metric Name}"
-    Day 0 = Monday, cycling through the week indefinitely.
-    """
     day, time_str = decode_snapshot(snapshot_id)
     weekday = _WEEKDAYS[day % 7]
-    metric_display = _METRIC_DISPLAY_NAMES.get(metric_name, metric_name.replace("_", " ").title())
+    metric_display = _METRIC_DISPLAY_NAMES.get(
+        metric_name,
+        metric_name.replace("_", " ").title()
+    )
     return f"{weekday}, Day {day} of simulation, {time_str}, {metric_display}"
 
 
@@ -74,7 +76,7 @@ def render_all(
     dataset: HeatmapDataset,
     output_dir: Path,
     resolution_km: float = 5.0,
-    idw_power: float = 2.0,
+    sigma: float = 2.5,
     use_land_mask: bool = True,
     dpi: int = 150,
 ) -> None:
@@ -87,33 +89,42 @@ def render_all(
     logger.info("Loading Denmark boundary (10m resolution)...")
     dk_boundary = load_denmark_boundary()
 
-    _compute_global_vmaxes(dataset)
-
     extent = [grid.lon_min, grid.lon_max, grid.lat_min, grid.lat_max]
 
     for metric_name, col_name in METRICS:
         metric_dir = output_dir / metric_name
         metric_dir.mkdir(parents=True, exist_ok=True)
+
         cfg = METRIC_CONFIG[metric_name]
 
-        for i, snap in enumerate(tqdm(dataset.snapshots, desc=f"Rendering {metric_name}")):
+        for i, snap in enumerate(
+            tqdm(dataset.snapshots, desc=f"Rendering {metric_name}")
+        ):
             out_path = metric_dir / f"{metric_name}_{i:04d}.png"
 
             try:
                 lats, lons, values = snap.metric_arrays(col_name)
             except Exception:
                 continue
+
             if len(values) == 0:
                 continue
 
-            raster = interpolate_grid(
-                grid.lat_grid, grid.lon_grid,
-                lats, lons, values,
-                power=idw_power,
+            raster = gaussian_splat(
+                lats,
+                lons,
+                values,
+                grid.lat_grid,
+                grid.lon_grid,
+                sigma=sigma,
             )
+
+            raster = normalize_0_1(raster)
 
             if land_mask is not None:
                 raster[~land_mask] = np.nan
+
+            raster = np.nan_to_num(raster, nan=0.0)
 
             fig, ax = plt.subplots(figsize=(8, 8), facecolor=BG)
             ax.set_facecolor(BG)
@@ -123,18 +134,22 @@ def render_all(
                 extent=extent,
                 origin="lower",
                 cmap=cfg["cmap"],
-                vmin=cfg["vmin"],
-                vmax=cfg["vmax"],
+                vmin=0.0,
+                vmax=1.0,
                 interpolation="bilinear",
             )
 
             dk_boundary.boundary.plot(
-                ax=ax, linewidth=0.8, color="#c8c8c8", zorder=3
+                ax=ax,
+                linewidth=0.8,
+                color="#c8c8c8",
+                zorder=3,
             )
 
             divider = make_axes_locatable(ax)
             cax = divider.append_axes("right", size="4%", pad=0.10)
             cax.set_facecolor(BG)
+
             cb = fig.colorbar(im, cax=cax)
             cb.set_label(cfg["colorbar_label"], color="white", fontsize=9)
             cb.ax.yaxis.set_tick_params(color="white", labelcolor="white")
@@ -142,7 +157,8 @@ def render_all(
 
             title = format_title(metric_name, snap.snapshot_id)
             ax.text(
-                0.5, 0.985,
+                0.5,
+                0.985,
                 title,
                 transform=ax.transAxes,
                 color="white",
@@ -160,22 +176,7 @@ def render_all(
                 bbox_inches="tight",
                 facecolor=fig.get_facecolor(),
             )
+
             plt.close(fig)
 
     logger.info("Done.")
-
-
-def _compute_global_vmaxes(dataset: HeatmapDataset) -> None:
-    for metric_name, col_name in METRICS:
-        cfg = METRIC_CONFIG[metric_name]
-        if cfg["vmax"] is not None:
-            continue
-        global_max = 0.0
-        for snap in dataset.snapshots:
-            try:
-                _, _, values = snap.metric_arrays(col_name)
-                if len(values):
-                    global_max = max(global_max, float(values.max()))
-            except Exception:
-                continue
-        cfg["vmax"] = global_max if global_max > 0 else 1.0

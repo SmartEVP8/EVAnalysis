@@ -45,7 +45,6 @@ class PipelineRunner:
             dataset,
             output_dir=Path("runs") / self.run_id / "heatmaps",
             resolution_km=5.0,
-            idw_power=2.0,
             use_land_mask=True,
             dpi=150,
         )
