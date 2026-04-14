@@ -16,7 +16,7 @@ import geopandas as gpd
 LAT_MIN = 54.50
 LAT_MAX = 57.80
 LON_MIN =  8.00
-LON_MAX = 13.00
+LON_MAX = 15.30
 
 
 @dataclass(frozen=True)

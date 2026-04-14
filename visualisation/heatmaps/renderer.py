@@ -6,25 +6,37 @@ import matplotlib.pyplot as plt
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from tqdm import tqdm
 
+from visualisation.heatmaps.idw import interpolate_grid
+
 from .denmark import DenmarkGrid, build_land_mask, load_denmark_boundary
-from .smooth import gaussian_splat
-from .loader import HeatmapDataset
+from .heatmaps_loader import HeatmapDataset
 
 logger = logging.getLogger(__name__)
 
 METRICS: list[tuple[str, str]] = [
-    ("queue_size", "queue_size_per_charger"),
+    ("queue_size", "total_queue_size"),
     ("utilization", "utilization"),
+    ("cancellation_rate", "cancellation_rate"),
 ]
 
 METRIC_CONFIG: dict[str, dict] = {
     "queue_size": {
         "cmap": "magma",
-        "colorbar_label": "Queue size (normalized 0–1)",
+        "colorbar_label": "Queue size",
+        "vmin": 0.0,
+        "vmax": 10.0,
     },
     "utilization": {
         "cmap": "magma",
-        "colorbar_label": "Utilization (0–1)",
+        "colorbar_label": "Utilization",
+        "vmin": 0.0,
+        "vmax": 1.0,
+    },
+    "cancellation_rate": {
+        "cmap": "magma",
+        "colorbar_label": "Cancellation rate",
+        "vmin": 0.0,
+        "vmax": 1.0,
     },
 }
 
@@ -33,19 +45,10 @@ _WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "
 _METRIC_DISPLAY_NAMES: dict[str, str] = {
     "queue_size": "Queue Size",
     "utilization": "Utilization",
+    "cancellation_rate": "Cancellation Rate",
 }
 
 BG = "#0b0f14"
-
-
-def normalize_0_1(raster: np.ndarray) -> np.ndarray:
-    """
-    Hard clamp into [0, 1].
-    Assumes input is already conceptually normalized or bounded.
-    """
-    raster = np.nan_to_num(raster, nan=0.0)
-    return np.clip(raster, 0.0, 1.0)
-
 
 def decode_snapshot(snapshot_id: int) -> tuple[int, str]:
     """
@@ -55,7 +58,7 @@ def decode_snapshot(snapshot_id: int) -> tuple[int, str]:
     day = snapshot_id // 1_000_000
     time_of_day = snapshot_id % 1_000_000
 
-    total_seconds = time_of_day / 1000
+    total_seconds = time_of_day
     hours = int(total_seconds // 3600)
     minutes = int((total_seconds % 3600) // 60)
 
@@ -76,7 +79,6 @@ def render_all(
     dataset: HeatmapDataset,
     output_dir: Path,
     resolution_km: float = 5.0,
-    sigma: float = 2.5,
     use_land_mask: bool = True,
     dpi: int = 150,
 ) -> None:
@@ -110,16 +112,12 @@ def render_all(
             if len(values) == 0:
                 continue
 
-            raster = gaussian_splat(
-                lats,
-                lons,
-                values,
+            raster = interpolate_grid(
+                lats, lons, values,
                 grid.lat_grid,
                 grid.lon_grid,
-                sigma=sigma,
+                power=2.0
             )
-
-            raster = normalize_0_1(raster)
 
             if land_mask is not None:
                 raster[~land_mask] = np.nan
@@ -134,8 +132,8 @@ def render_all(
                 extent=extent,
                 origin="lower",
                 cmap=cfg["cmap"],
-                vmin=0.0,
-                vmax=1.0,
+                vmin=cfg["vmin"],
+                vmax=cfg["vmax"],
                 interpolation="bilinear",
             )
 

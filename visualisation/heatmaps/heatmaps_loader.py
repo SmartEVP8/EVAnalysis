@@ -11,7 +11,8 @@ import polars as pl
 class Snap:
     STATION_ID = "StationId"
     UTILIZATION = "utilization"
-    QUEUE = "queue_size_per_charger"
+    QUEUE = "total_queue_size"
+    CANCELLATION = "cancellation_rate"
     DAY = "day"
     TIME = "time_of_day"
 
@@ -69,6 +70,7 @@ def load_heatmap_data(
         Snap.STATION_ID,
         Snap.UTILIZATION,
         Snap.QUEUE,
+        Snap.CANCELLATION,
     ])
 
     stations_df = stations_df.select([

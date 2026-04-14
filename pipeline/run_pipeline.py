@@ -2,7 +2,7 @@ from pathlib import Path
 
 from analysis.metrics_analyser.station_metrics_analyser import analyse_station
 from analysis.metrics_analyser.charger_metrics_analyser import analyse_charger
-from visualisation.heatmaps.loader import load_heatmap_data
+from visualisation.heatmaps.heatmaps_loader import load_heatmap_data
 from visualisation.heatmaps.renderer import render_all
 
 
