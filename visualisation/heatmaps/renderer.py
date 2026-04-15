@@ -1,4 +1,7 @@
-import logging
+"""
+Converts interpolated grid data into formatted PNG images with consistent 
+styling, color scales, and geographic boundaries.
+"""
 from pathlib import Path
 
 import numpy as np
@@ -7,11 +10,8 @@ from mpl_toolkits.axes_grid1 import make_axes_locatable
 from tqdm import tqdm
 
 from visualisation.heatmaps.idw import interpolate_grid
-
 from .denmark import DenmarkGrid, build_land_mask, load_denmark_boundary
 from .heatmaps_loader import HeatmapDataset
-
-logger = logging.getLogger(__name__)
 
 METRICS: list[tuple[str, str]] = [
     ("queue_size", "total_queue_size"),
@@ -19,6 +19,7 @@ METRICS: list[tuple[str, str]] = [
     ("cancellation_rate", "cancellation_rate"),
 ]
 
+# Aesthetic settings for the heatmaps (colors, labels, and value ranges)
 METRIC_CONFIG: dict[str, dict] = {
     "queue_size": {
         "cmap": "magma",
@@ -48,17 +49,18 @@ _METRIC_DISPLAY_NAMES: dict[str, str] = {
     "cancellation_rate": "Cancellation Rate",
 }
 
+# The dark-mode background color (matches the aesthetics of modern dashboards)
 BG = "#0b0f14"
 
 def decode_snapshot(snapshot_id: int) -> tuple[int, str]:
     """
-    snapshot_id = day * 1_000_000 + time_of_day_ms
-    Returns (day, "HH:MM")
+    Breaks our custom snapshot ID back down into human-readable time.
+
+    Returns:
+        tuple: (Day number, "HH:MM" timestamp)
     """
     day = snapshot_id // 1_000_000
-    time_of_day = snapshot_id % 1_000_000
-
-    total_seconds = time_of_day
+    total_seconds = snapshot_id % 1_000_000
     hours = int(total_seconds // 3600)
     minutes = int((total_seconds % 3600) // 60)
 
@@ -66,6 +68,10 @@ def decode_snapshot(snapshot_id: int) -> tuple[int, str]:
 
 
 def format_title(metric_name: str, snapshot_id: int) -> str:
+    """
+    Creates a descriptive title for the map image.
+    Example: 'Monday, Day 1 of simulation, 08:30, Utilization'
+    """
     day, time_str = decode_snapshot(snapshot_id)
     weekday = _WEEKDAYS[day % 7]
     metric_display = _METRIC_DISPLAY_NAMES.get(
@@ -82,15 +88,21 @@ def render_all(
     use_land_mask: bool = True,
     dpi: int = 150,
 ) -> None:
+    """
+    This function serves as the main loop for generating images at each time step in the
+    simulation by first setting up the geographic grid and land mask, then iterating
+    over each metric and each moment in time, interpolating station data into a smooth heatmap.
+    Then it applies the land mask to prevent values from extending into the ocean, and
+    finally saving the resulting image as a PNG.
+    """
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
     grid = DenmarkGrid.default(resolution_km=resolution_km)
     land_mask = build_land_mask(grid) if use_land_mask else None
-
-    logger.info("Loading Denmark boundary (10m resolution)...")
     dk_boundary = load_denmark_boundary()
 
+    # Bounding box
     extent = [grid.lon_min, grid.lon_max, grid.lat_min, grid.lat_max]
 
     for metric_name, col_name in METRICS:
@@ -99,10 +111,11 @@ def render_all(
 
         cfg = METRIC_CONFIG[metric_name]
 
+        # Use tqdm to show a progress bar in the terminal while rendering
         for i, snap in enumerate(
             tqdm(dataset.snapshots, desc=f"Rendering {metric_name}")
         ):
-            out_path = metric_dir / f"{metric_name}_{i:04d}.png"
+            out_path = metric_dir / f"{metric_name}_{i}.png"
 
             try:
                 lats, lons, values = snap.metric_arrays(col_name)
@@ -116,7 +129,6 @@ def render_all(
                 lats, lons, values,
                 grid.lat_grid,
                 grid.lon_grid,
-                power=2.0
             )
 
             if land_mask is not None:
@@ -127,6 +139,7 @@ def render_all(
             fig, ax = plt.subplots(figsize=(8, 8), facecolor=BG)
             ax.set_facecolor(BG)
 
+            # Draw the heatmap
             im = ax.imshow(
                 raster,
                 extent=extent,
@@ -134,13 +147,13 @@ def render_all(
                 cmap=cfg["cmap"],
                 vmin=cfg["vmin"],
                 vmax=cfg["vmax"],
-                interpolation="bilinear",
+                interpolation="sinc",
             )
 
             dk_boundary.boundary.plot(
                 ax=ax,
                 linewidth=0.8,
-                color="#c8c8c8",
+                color="#b5b5b5",
                 zorder=3,
             )
 
@@ -176,5 +189,3 @@ def render_all(
             )
 
             plt.close(fig)
-
-    logger.info("Done.")
