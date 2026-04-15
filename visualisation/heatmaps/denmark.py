@@ -8,10 +8,13 @@ import numpy as np
 import rasterio.features
 import geopandas as gpd
 
-# Geographic bounding box for Denmark 
-# Reference: https://da.wikipedia.org/wiki/Fil:La2-demis-denmark.png
-# Importantly: These bounds include Bornholm, despite us not having it in the simulation.
-# This is done because NaturalEarth draws it anyways, even if LON_MAX is lowered to 13.20, so we would have it regardless.
+"""
+Geographic bounding box for Denmark found at: https://da.wikipedia.org/wiki/Fil:La2-demis-denmark.png
+
+Importantly: These bounds include Bornholm, despite us not having it in the simulation.
+This is done because NaturalEarth draws it anyways, even if LON_MAX is lowered to 13.20,
+so we would have it regardless.
+"""
 LAT_MIN = 54.30
 LAT_MAX = 57.80
 LON_MIN =  7.90
