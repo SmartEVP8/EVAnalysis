@@ -48,7 +48,9 @@ def analyse_charger(parquet_path: Path, run_id: str) -> None:
     out_analysis = OUTPUT_ROOT / run_id / "analysis"
     out_analysis.mkdir(parents=True, exist_ok=True)
 
-    snapshot_df = snapshot_df.sort(["StationId", "ChargerId", "day", "time_of_day"])
+    snapshot_df = snapshot_df.sort(
+        ["StationId", "ChargerId", "day", "time_of_day"]
+    )
     snapshot_df.write_parquet(out_analysis / "charger_snapshots.parquet")
 
     print(f"  Saved charger_snapshots.parquet ({len(snapshot_df)} rows)")

@@ -61,10 +61,10 @@ def analyse_station(parquet_path: Path, run_id: str) -> None:
     out_analysis = OUTPUT_ROOT / run_id / "analysis"
     out_analysis.mkdir(parents=True, exist_ok=True)
 
-    snapshot_df = (
-        snapshot_df.sort(["StationId", "day", "time_of_day"])
-        .write_parquet(out_analysis / "station_snapshots.parquet")
+    snapshot_df = snapshot_df.sort(
+        ["StationId", "day", "time_of_day"]
     )
+    snapshot_df.write_parquet(out_analysis / "station_snapshots.parquet")
 
     print(f"  Saved station_snapshots.parquet ({len(snapshot_df)} rows)")
 
