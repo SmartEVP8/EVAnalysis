@@ -60,7 +60,6 @@ class PipelineRunner:
 
 
     def file_exists(self, path: Path, description: str) -> bool:
-        """Logs a warning and returns False if a required input file is missing."""
         if not path.exists():
             raise FileNotFoundError(f"{description} not found at {path}")
             
@@ -89,22 +88,16 @@ class PipelineRunner:
     def run_heatmaps(self) -> None:
         """
         Renders spatial heatmaps from the analysed station snapshots.
-
-        Raises:
-            FileNotFoundError: If run_analysis() has not been called first.
         """
         p = self.paths
 
-        if not p.station_snapshots.exists():
-            raise FileNotFoundError(
-                f"Station snapshots not found at {p.station_snapshots}. "
-                "Call run_analysis() before run_heatmaps()."
-            )
+        self.file_exists(p.station_snapshots, "Station snapshots")
 
         dataset = load_heatmap_data(
             snapshots_path=p.station_snapshots,
             stations_path=p.stations_locations,
         )
+
         render_all(
             dataset,
             output_dir=Path("runs") / self.run_id / "heatmaps",
@@ -115,10 +108,9 @@ class PipelineRunner:
 
 
     def run_all(self) -> None:
-        """Executes the full end-to-end pipeline."""
         print(f"Run ID: {self.run_id}")
         print(f"Source: {self.paths.run_dir}")
 
         self.run_analysis()
         self.run_outlier_detection()
-        # self.run_heatmaps()
+        self.run_heatmaps()
