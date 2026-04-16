@@ -37,6 +37,10 @@ def analyse_station(parquet_path: Path, run_id: str) -> None:
     
     validate_schema(df, STATION_SCHEMA, "StationSnapshotMetric")
 
+    out_analysis = OUTPUT_ROOT / run_id / "analysis"
+    out_analysis.mkdir(parents=True, exist_ok=True)
+
+
     snapshot_df = (
         df.with_columns([
             pl.when(pl.col("TotalMaxKWh") > 0)
@@ -58,9 +62,6 @@ def analyse_station(parquet_path: Path, run_id: str) -> None:
         ])
     )
 
-    out_analysis = OUTPUT_ROOT / run_id / "analysis"
-    out_analysis.mkdir(parents=True, exist_ok=True)
-
     snapshot_df = snapshot_df.sort(
         ["StationId", "day", "time_of_day"]
     )
@@ -71,11 +72,9 @@ def analyse_station(parquet_path: Path, run_id: str) -> None:
     out_percentiles = OUTPUT_ROOT / run_id / "percentiles" / "station"
     out_percentiles.mkdir(parents=True, exist_ok=True)
 
-    clean_df = snapshot_df.drop_nulls(["utilization", "total_queue_size", "Price"])
-
     # Aggregate global percentiles across all stations to see network-wide trends
     percentile_df = (
-        clean_df
+        snapshot_df
         .group_by(["weekday_name", "time_of_day", "time_label"])
         .agg(
             [pl.col("utilization").quantile(q).alias(f"utilization_p{int(q*100)}")

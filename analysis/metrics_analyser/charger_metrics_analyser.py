@@ -37,20 +37,17 @@ def analyse_charger(parquet_path: Path, run_id: str) -> None:
     
     validate_schema(df, CHARGER_SCHEMA, "ChargerSnapshotMetric")
 
+    out_analysis = OUTPUT_ROOT / run_id / "analysis"
+    out_analysis.mkdir(parents=True, exist_ok=True)
+
     snapshot_df = df.select([
         "StationId", "ChargerId",
         "day", "weekday_idx", "weekday_name",
         "time_of_day", "time_label",
         "Utilization", "QueueSize",
         "DeliveredKW", "TargetEVDemandKW",
-    ])
+    ]).sort(["StationId", "ChargerId", "day", "time_of_day"])
 
-    out_analysis = OUTPUT_ROOT / run_id / "analysis"
-    out_analysis.mkdir(parents=True, exist_ok=True)
-
-    snapshot_df = snapshot_df.sort(
-        ["StationId", "ChargerId", "day", "time_of_day"]
-    )
     snapshot_df.write_parquet(out_analysis / "charger_snapshots.parquet")
 
     print(f"  Saved charger_snapshots.parquet ({len(snapshot_df)} rows)")
@@ -58,12 +55,9 @@ def analyse_charger(parquet_path: Path, run_id: str) -> None:
     out_percentiles = OUTPUT_ROOT / run_id / "percentiles" / "charger"
     out_percentiles.mkdir(parents=True, exist_ok=True)
 
-    # Filter out null records
-    clean_df = snapshot_df.drop_nulls(["Utilization", "QueueSize"])
-
     # Calculate global percentiles grouped by time of day and weekday
     percentile_df = (
-        clean_df
+        snapshot_df
         .group_by(["weekday_name", "time_of_day", "time_label"])
         .agg(
             [pl.col("Utilization").quantile(q).alias(f"utilization_p{int(q*100)}")

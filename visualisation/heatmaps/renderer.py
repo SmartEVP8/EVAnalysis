@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from tqdm import tqdm
 
-from visualisation.heatmaps.idw import interpolate_grid
+from visualisation.heatmaps.inverse_distance_weighting import interpolate_grid
 from .denmark import DenmarkGrid, build_land_mask, load_denmark_boundary
 from .heatmaps_loader import HeatmapDataset
 
@@ -109,7 +109,7 @@ def render_all(
         metric_dir = output_dir / metric_name
         metric_dir.mkdir(parents=True, exist_ok=True)
 
-        cfg = METRIC_CONFIG[metric_name]
+        config = METRIC_CONFIG[metric_name]
 
         # Use tqdm to show a progress bar in the terminal while rendering
         for i, snap in enumerate(
@@ -144,9 +144,9 @@ def render_all(
                 raster,
                 extent=extent,
                 origin="lower",
-                cmap=cfg["cmap"],
-                vmin=cfg["vmin"],
-                vmax=cfg["vmax"],
+                cmap=config["cmap"],
+                vmin=config["vmin"],
+                vmax=config["vmax"],
                 interpolation="sinc",
             )
 
@@ -162,7 +162,7 @@ def render_all(
             cax.set_facecolor(BG)
 
             cb = fig.colorbar(im, cax=cax)
-            cb.set_label(cfg["colorbar_label"], color="white", fontsize=9)
+            cb.set_label(config["colorbar_label"], color="white", fontsize=9)
             cb.ax.yaxis.set_tick_params(color="white", labelcolor="white")
             cb.outline.set_edgecolor("#444444")
 
