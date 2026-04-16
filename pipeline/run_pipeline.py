@@ -59,11 +59,11 @@ class PipelineRunner:
         self.paths = RunPaths.from_run_dir(run_dir)
 
 
-    def _require(self, path: Path, description: str) -> bool:
+    def file_exists(self, path: Path, description: str) -> bool:
         """Logs a warning and returns False if a required input file is missing."""
         if not path.exists():
-            print(f"  [skip] {description} not found at {path}")
-            return False
+            raise FileNotFoundError(f"{description} not found at {path}")
+            
         return True
 
 
@@ -71,13 +71,13 @@ class PipelineRunner:
         """Runs metric analysis for stations, chargers, and EV arrivals."""
         p = self.paths
 
-        if self._require(p.station_metrics, "Station metrics"):
+        if self.file_exists(p.station_metrics, "Station metrics"):
             analyse_station(p.station_metrics, self.run_id)
 
-        if self._require(p.charger_metrics, "Charger metrics"):
+        if self.file_exists(p.charger_metrics, "Charger metrics"):
             analyse_charger(p.charger_metrics, self.run_id)
 
-        if self._require(p.arrival_metrics, "Arrival metrics"):
+        if self.file_exists(p.arrival_metrics, "Arrival metrics"):
             analyse_arrival(p.arrival_metrics, self.run_id)
 
 
