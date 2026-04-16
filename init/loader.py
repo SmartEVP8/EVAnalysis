@@ -1,46 +1,54 @@
 """
-loader.py
----------
-Reads parquet files and enriches them with calendar columns derived from SimTime.
+Provides utilities for reading raw simulation data and enriching it with 
+human-readable time and date information.
 """
 
 from pathlib import Path
-
 import polars as pl
 
-# Day 0 of the simulation is a Sunday.
-# Python's calendar uses Mon=0, so we use our own mapping: Sun=0 ... Sat=6.
+# Reference point: The simulation clock starts at midnight on a Sunday.
 SIMULATION_START_DOW = 0
 
 WEEKDAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday",
                  "Thursday", "Friday", "Saturday"]
 
-MS_PER_SECOND = 1_000
-SECONDS_PER_DAY = 86_400
-MS_PER_DAY = SECONDS_PER_DAY * MS_PER_SECOND
+# Milliseconds in a day
+MS_PER_DAY = 86_400_000
+
 
 def infer_run_id(parquet_path: Path) -> str:
     """
-    Derive the run ID from the parquet file's path.
+    Identifies the simulation run ID based on the folder structure.
+    
+    Args:
+        parquet_path (Path): The path to a data file.
+    Returns:
+        str: The name of the parent directory (e.g., 'Run_001').
     """
     return parquet_path.parent.name
 
 
 def add_day_columns_to_parquet(parquet_path: Path) -> pl.DataFrame:
     """
-    Read a parquet file and attach derived columns.
+    Reads a raw parquet file and adds calendar metadata.
 
-    day          : simulation day index (0-based)
-    time_of_day  : seconds since midnight on that day
-    weekday_idx  : 0=Sun, 1=Mon, … 6=Sat
-    weekday_name : e.g. "Sunday"
-    time_label   : "HH:MM" for display on chart x-axis
+    Raw simulation data only tracks milliseconds. This function adds:
+    - day: Which day of the simulation we are on (0, 1, 2...).
+    - time_of_day: How many seconds have passed since midnight.
+    - weekday_idx: The day of the week (0-6).
+    - weekday_name: The actual name (e.g., 'Monday').
+    - time_label: A formatted string for visualisation (e.g., '14:30').
+
+    Args:
+        parquet_path (Path): Path to the raw .parquet file.
+    Returns:
+        pl.DataFrame: A table enriched with temporal columns.
     """
     df = pl.read_parquet(parquet_path)
 
     df = df.with_columns([
         (pl.col("SimTime") // MS_PER_DAY).alias("day").cast(pl.Int32),
-        ((pl.col("SimTime") % MS_PER_DAY) // MS_PER_SECOND).alias("time_of_day").cast(pl.Int32),
+        (pl.col("SimTime") % MS_PER_DAY // 1000).alias("time_of_day").cast(pl.Int32),
     ])
 
     df = df.with_columns([
@@ -68,25 +76,27 @@ def add_day_columns_to_parquet(parquet_path: Path) -> pl.DataFrame:
 
 
 def unique_days(df: pl.DataFrame) -> list[int]:
-    """Return sorted list of all day indices present in the data."""
+    """Returns a sorted list of every day index represented in the dataset."""
     return sorted(df["day"].unique().to_list())
 
 
 def unique_stations(df: pl.DataFrame) -> list[int]:
-    """Return sorted list of all station IDs present in the data."""
+    """Returns a sorted list of every StationId present in the data."""
     return sorted(df["StationId"].unique().to_list())
 
 
 def unique_chargers(df: pl.DataFrame, station_id: int) -> list[int]:
-    """Return sorted list of charger IDs for a given station."""
+    """Returns a sorted list of chargers belonging to a specific station."""
     return sorted(
         df.filter(pl.col("StationId") == station_id)["ChargerId"].unique().to_list()
     )
 
 
 def filter_day(df: pl.DataFrame, day: int) -> pl.DataFrame:
+    """Helper to slice the data for a specific 24-hour period."""
     return df.filter(pl.col("day") == day)
 
 
 def filter_station(df: pl.DataFrame, station_id: int) -> pl.DataFrame:
+    """Helper to slice the data for a specific station."""
     return df.filter(pl.col("StationId") == station_id)
