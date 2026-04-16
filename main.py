@@ -1,86 +1,73 @@
 """
-main.py
-
-Reads the parquet root directory from config.toml.
-
-python main.py              # process the most recently modified run
-python main.py <uuid>       # process a specific run by its UUID
+This script manages configuration loading, handles command-line arguments, 
+and resolves which simulation run should be processed.
 """
 
 import sys
 import tomllib
 from pathlib import Path
 
-from analysis.metrics_analyser.charger_metrics_analyser import analyse_charger
-from analysis.metrics_analyser.station_metrics_analyser import analyse_station
+from pipeline.run_pipeline import PipelineRunner
 
 CONFIG_PATH = Path(__file__).parent / "config.toml"
 
-RUNS_DIR = Path(__file__).parent / "runs"
-RUNS_DIR.mkdir(exist_ok=True)
-
-STATION_FILENAME = "StationSnapshotMetric.parquet"
-CHARGER_FILENAME = "ChargerSnapshotMetric.parquet"
-
 
 def load_config() -> dict:
-    if not CONFIG_PATH.exists():
-        print(f"Error: config.toml not found at {CONFIG_PATH}")
-        sys.exit(1)
+    """
+    Reads the project's settings from the config.toml file.
+    
+    This typically includes system paths, such as where the raw simulation 
+    parquet files are stored.
+    """
     with open(CONFIG_PATH, "rb") as f:
         return tomllib.load(f)
 
 
 def resolve_run(perkuet_root: Path, uuid: str | None) -> Path:
     """
-    Return the run directory to process.
-    If uuid is given, verify it exists and return it.
-    Otherwise, return the most recently modified run folder.
+    Determines which simulation directoryg to process.
+
+    If a specific ID (UUID) is provided, it looks for that folder and executes that run.
+    If no ID is provided, it automatically selects the most recently modified directory.
+
+    Args:
+        perkuet_root (Path): The base directory where all simulation runs are stored.
+        uuid (str | None): An optional specific run identifier.
+
+    Returns:
+        Path: The absolute path to the chosen simulation run directory.
+
+    Raises:
+        FileNotFoundError: If a specific UUID is requested but doesn't exist,
+        or if no runs are found in the directory.
     """
     if uuid:
         run_dir = perkuet_root / uuid
         if not run_dir.is_dir():
-            print(f"Error: run '{uuid}' not found in {perkuet_root}")
-            sys.exit(1)
+            raise FileNotFoundError(f"Run '{uuid}' not found in {perkuet_root}")
         return run_dir
 
     runs = [p for p in perkuet_root.iterdir() if p.is_dir()]
     if not runs:
-        print(f"Error: no run folders found in '{perkuet_root}'.")
-        sys.exit(1)
-
+        raise FileNotFoundError(f"No simulation runs found in {perkuet_root}")
+        
     return max(runs, key=lambda p: p.stat().st_mtime)
 
 
-def main() -> None:
+def main():
     config = load_config()
     perkuet_root = Path(config["paths"]["perkuet_dir"])
 
-    if not perkuet_root.exists():
-        print(f"Error: directory '{perkuet_root}' does not exist.")
-        sys.exit(1)
-
     uuid = sys.argv[1] if len(sys.argv) > 1 else None
-    run_dir = resolve_run(perkuet_root, uuid)
-    run_id = run_dir.name
-
-    print(f"Run ID : {run_id}")
-    print(f"Source : {run_dir}")
-
-    station_path = run_dir / STATION_FILENAME
-    charger_path = run_dir / CHARGER_FILENAME
-
-    if station_path.exists():
-        analyse_station(station_path, run_id)
-    else:
-        print(f"[warn] {STATION_FILENAME} not found, skipping station analysis.")
-
-    if charger_path.exists():
-        analyse_charger(charger_path, run_id)
-    else:
-        print(f"[warn] {CHARGER_FILENAME} not found, skipping charger analysis.")
-
-    print("\nAll done.")
+    
+    try:
+        run_dir = resolve_run(perkuet_root, uuid)
+        pipeline = PipelineRunner(run_dir)
+        pipeline.run_all()
+        
+    except Exception as e:
+        print(f"Critical Error: {e}")
+        sys.exit(1)
 
 
 if __name__ == "__main__":

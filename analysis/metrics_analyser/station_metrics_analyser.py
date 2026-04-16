@@ -1,16 +1,7 @@
 """
-Station-level metrics:
-  - Utilization: TotalDeliveredKWh / TotalMaxKWh
-  - P25 | P50 | P75 | P90 | P95 of station utilization — per day
-  - Queue size: TotalQueueSize / TotalChargers
-  - P25 | P50 | P75 | P90 | P95 of queue size — per day
-  - Cancellation rate: Cancellations / Reservations
-  - Total reservations
-  - Price
-
-Results are written to:
-    runs/{run_id}/analysis/station_snapshots.parquet
-    runs/{run_id}/percentiles/station/station_percentiles_{weekday}.parquet
+Module for analyzing aggregate station-level metrics.
+Calculates high-level KPIs such as station utilization, cancellation rates, 
+and price distributions across the charging network.
 """
 
 from pathlib import Path
@@ -24,49 +15,81 @@ PERCENTILES = [0.25, 0.50, 0.75, 0.90, 0.95]
 
 
 def analyse_station(parquet_path: Path, run_id: str) -> None:
+    """
+    Performs aggregate analysis on station metrics for a specific simulation run.
+    
+    This function processes station snapshot data to derive key performance 
+    indicators (KPIs), handles division-by-zero guards, and exports logs
+    and global statistical summaries.
+
+    Args:
+        parquet_path (Path): The file path to the input parquet file containing station metrics.
+        run_id (str): The unique identifier for the current simulation run.
+
+    Raises:
+        SchemaValidationError: If the input dataframe does not match STATION_SCHEMA.
+        FileNotFoundError: If the parquet_path does not exist.
+    """
     print(f"\n[Station] Analysing {parquet_path.name}...")
+
+    # Load data and add time-based columns
     df = add_day_columns_to_parquet(parquet_path)
+    
     validate_schema(df, STATION_SCHEMA, "StationSnapshotMetric")
+
+    out_analysis = OUTPUT_ROOT / run_id / "analysis"
+    out_analysis.mkdir(parents=True, exist_ok=True)
+
 
     snapshot_df = (
         df.with_columns([
-            (pl.col("TotalDeliveredKWh") / pl.col("TotalMaxKWh")).alias("utilization"),
-            (pl.col("TotalQueueSize") / pl.col("TotalChargers")).alias("queue_size_per_charger"),
+            pl.when(pl.col("TotalMaxKWh") > 0)
+              .then(pl.col("TotalDeliveredKWh") / pl.col("TotalMaxKWh"))
+              .otherwise(None)
+              .alias("utilization"),
+
+            pl.col("TotalQueueSize").alias("total_queue_size"),
+
             pl.when(pl.col("Reservations") > 0)
-                .then(pl.col("Cancellations") / pl.col("Reservations"))
-                .otherwise(0.0).alias("cancellation_rate"),
+              .then(pl.col("Cancellations") / pl.col("Reservations"))
+              .otherwise(None)
+              .alias("cancellation_rate"),
         ])
         .select([
-            "StationId", "day", "weekday_idx", "weekday_name", "time_of_day",
-            "time_label", "utilization", "queue_size_per_charger", "TotalQueueSize",
-            "cancellation_rate", "Reservations", "Cancellations", "Price", "TotalChargers",
+            "StationId", "day", "weekday_idx", "weekday_name", "time_of_day", 
+            "time_label", "utilization", "total_queue_size", "Price", 
+            "Reservations", "Cancellations", "cancellation_rate", "TotalChargers",
         ])
     )
 
-    # Snapshots as one file
-    out_analysis = OUTPUT_ROOT / run_id / "analysis"
-    out_analysis.mkdir(parents=True, exist_ok=True)
-    snapshot_df.sort(["StationId", "day", "time_of_day"]).write_parquet(out_analysis / "station_snapshots.parquet")
-    print(f"  Saved station_snapshots.parquet  ({len(snapshot_df)} rows)")
+    snapshot_df = snapshot_df.sort(
+        ["StationId", "day", "time_of_day"]
+    )
+    snapshot_df.write_parquet(out_analysis / "station_snapshots.parquet")
 
-    # Percentile files per weekday
+    print(f"  Saved station_snapshots.parquet ({len(snapshot_df)} rows)")
+
     out_percentiles = OUTPUT_ROOT / run_id / "percentiles" / "station"
     out_percentiles.mkdir(parents=True, exist_ok=True)
 
-    for weekday_name, group_df in snapshot_df.group_by("weekday_name"):
-        weekday_name = weekday_name[0].lower()
-        percentile_df = (
-            group_df.group_by("StationId")
-            .agg(
-                [pl.col("utilization").quantile(q).alias(f"utilization_p{int(q*100)}")
-                 for q in PERCENTILES]
-                +
-                [pl.col("queue_size_per_charger").quantile(q).alias(f"queue_size_p{int(q*100)}")
-                 for q in PERCENTILES]
-            )
-            .sort("StationId")
+    # Aggregate global percentiles across all stations to see network-wide trends
+    percentile_df = (
+        snapshot_df
+        .group_by(["weekday_name", "time_of_day", "time_label"])
+        .agg(
+            [pl.col("utilization").quantile(q).alias(f"utilization_p{int(q*100)}")
+             for q in PERCENTILES]
+            +
+            [pl.col("total_queue_size").quantile(q).alias(f"queue_size_p{int(q*100)}")
+             for q in PERCENTILES]
+            +
+            [pl.col("Price").quantile(q).alias(f"price_p{int(q*100)}")
+             for q in PERCENTILES]
         )
+        .sort(["weekday_name", "time_of_day"])
+    )
 
-        out_path = out_percentiles / f"station_percentiles_{weekday_name}.parquet"
-        percentile_df.write_parquet(out_path)
-        print(f"  Saved station_percentiles_{weekday_name}.parquet  ({len(percentile_df)} rows)")
+    out_path = out_percentiles / "station_percentiles_global.parquet"
+    percentile_df.write_parquet(out_path)
+
+    print(f"  Saved station_percentiles_global.parquet ({len(percentile_df)} rows)")
