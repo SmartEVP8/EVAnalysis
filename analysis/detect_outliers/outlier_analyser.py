@@ -14,9 +14,9 @@ STATION_METRICS = ["utilization_p50", "utilization_p90", "queue_size_p50", "queu
 CHARGER_METRICS = ["utilization_p50", "utilization_p90", "queue_size_p50", "queue_size_p90"]
 
 def detect_outliers_global(
-    df: pl.DataFrame, 
-    id_cols: list[str], 
-    metric_cols: list[str], 
+    df: pl.DataFrame,
+    id_cols: list[str],
+    metric_cols: list[str],
     label: str
 ) -> pl.DataFrame:
     """
