@@ -8,8 +8,10 @@ dependencies = [
     "altair-viewer>=0.4.0",
     "altair[all]>=6.0.0",
     "jupyter>=1.1.1",
+    "matplotlib>=3.10.8",
     "polars>=1.38.1",
     "scipy>=1.17.1",
+    "tqdm>=4.67.3",
 ]
 
 [dependency-groups]
