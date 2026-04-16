@@ -29,7 +29,7 @@ def detect_outliers(
     for their (weekday, time-of-day) peer group.
     """
     all_flags: list[pl.DataFrame] = []
-    group_cols = ["weekday_name", "time_of_day"]
+    group_cols = ["weekday_name", "simtime_ms"]
 
     for metric in metric_cols:
         if metric not in df.columns:

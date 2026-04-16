@@ -17,7 +17,7 @@ class Snap:
     QUEUE = "total_queue_size"
     CANCELLATION = "cancellation_rate"
     DAY = "day"
-    TIME = "time_of_day"
+    TIME = "simtime_ms"
 
 
 class Station:
