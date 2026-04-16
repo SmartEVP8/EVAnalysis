@@ -20,7 +20,7 @@ def analyse_station(parquet_path: Path, run_id: str) -> None:
     
     This function processes station snapshot data to derive key performance 
     indicators (KPIs), handles division-by-zero guards, and exports logs
-    and global statistical summaries.
+    and statistical summaries.
 
     Args:
         parquet_path (Path): The file path to the input parquet file containing station metrics.
@@ -72,7 +72,7 @@ def analyse_station(parquet_path: Path, run_id: str) -> None:
     out_percentiles = OUTPUT_ROOT / run_id / "percentiles" / "station"
     out_percentiles.mkdir(parents=True, exist_ok=True)
 
-    # Aggregate global percentiles across all stations to see network-wide trends
+    # Aggregate percentiles across all stations to see network-wide trends
     percentile_df = (
         snapshot_df
         .group_by(["weekday_name", "time_of_day", "time_label"])
@@ -89,7 +89,7 @@ def analyse_station(parquet_path: Path, run_id: str) -> None:
         .sort(["weekday_name", "time_of_day"])
     )
 
-    out_path = out_percentiles / "station_percentiles_global.parquet"
+    out_path = out_percentiles / "station_percentiles.parquet"
     percentile_df.write_parquet(out_path)
 
-    print(f"  Saved station_percentiles_global.parquet ({len(percentile_df)} rows)")
+    print(f"  Saved station_percentiles.parquet ({len(percentile_df)} rows)")

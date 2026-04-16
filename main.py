@@ -66,7 +66,7 @@ def main():
         pipeline.run_all()
         
     except Exception as e:
-        print(f"Critical Error: {e}")
+        print(f"Error: {e}")
         sys.exit(1)
 
 
