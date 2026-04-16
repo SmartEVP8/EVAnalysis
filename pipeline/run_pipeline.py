@@ -8,6 +8,7 @@ from pathlib import Path
 
 from analysis.metrics_analyser.station_metrics_analyser import analyse_station
 from analysis.metrics_analyser.charger_metrics_analyser import analyse_charger
+from analysis.detect_outliers.outlier_analyser import process_outliers
 from visualisation.heatmaps.heatmaps_loader import load_heatmap_data
 from visualisation.heatmaps.renderer import render_all
 
@@ -55,12 +56,12 @@ class PipelineRunner:
         if self.station_metrics.exists():
             analyse_station(self.station_metrics, self.run_id)
         else:
-            print(f"[Warning] Missing station raw parquet at {self.station_metrics}")
+            print(f"Missing station raw parquet at {self.station_metrics}")
 
         if self.charger_metrics.exists():
             analyse_charger(self.charger_metrics, self.run_id)
         else:
-            print(f"[Warning] Missing charger raw parquet at {self.charger_metrics}")
+            print(f"Missing charger raw parquet at {self.charger_metrics}")
 
     def run_heatmaps(self):
         """
@@ -105,4 +106,5 @@ class PipelineRunner:
         print(f"Source: {self.run_dir}")
 
         self.run_analysis()
-        self.run_heatmaps()
+        process_outliers(self.run_id)
+        # self.run_heatmaps()

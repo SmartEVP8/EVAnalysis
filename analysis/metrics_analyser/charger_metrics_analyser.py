@@ -20,7 +20,7 @@ def analyse_charger(parquet_path: Path, run_id: str) -> None:
     
     This function reads raw parquet data, adds temporal metadata (days of simulation run (e.g., 0, 1, 2)),
     weekdays (e.g., Monday, Tuesday), and time labels (e.g., "08:00-09:00"), validates the schema integrity,
-    and exports both a sorted snapshot log and aggregated global percentiles for charger utilization and queue sizes.
+    and exports both a sorted snapshot log and aggregated percentiles for charger utilization and queue sizes.
 
     Args:
         parquet_path (Path): The file path to the input parquet file containing charger metrics.
@@ -55,7 +55,7 @@ def analyse_charger(parquet_path: Path, run_id: str) -> None:
     out_percentiles = OUTPUT_ROOT / run_id / "percentiles" / "charger"
     out_percentiles.mkdir(parents=True, exist_ok=True)
 
-    # Calculate global percentiles grouped by time of day and weekday
+    # Calculate percentiles grouped by time of day and weekday
     percentile_df = (
         snapshot_df
         .group_by(["weekday_name", "time_of_day", "time_label"])
@@ -69,7 +69,7 @@ def analyse_charger(parquet_path: Path, run_id: str) -> None:
         .sort(["weekday_name", "time_of_day"])
     )
 
-    out_path = out_percentiles / "charger_percentiles_global.parquet"
+    out_path = out_percentiles / "charger_percentiles.parquet"
     percentile_df.write_parquet(out_path)
 
-    print(f"  Saved charger_percentiles_global.parquet ({len(percentile_df)} rows)")
+    print(f"  Saved charger_percentiles.parquet ({len(percentile_df)} rows)")
