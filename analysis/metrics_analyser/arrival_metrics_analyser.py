@@ -24,7 +24,7 @@ def analyse_arrival(parquet_path: Path, run_id: str) -> None:
     aggregates per time slot to produce:
       - missed_deadline_pct : share of EVs that missed their deadline (0–100)
       - path_deviation_minutes*  : percentile distribution of route deviation in minutes
-      - delta_arrival_*      : percentile distribution of arrival time delta in milliseconds
+      - delta_arrival_*      : percentile distribution of arrival time delta in minutes
     """
     print(f"\n[Arrival] Analysing {parquet_path.name}...")
 
@@ -35,13 +35,13 @@ def analyse_arrival(parquet_path: Path, run_id: str) -> None:
     snapshot_df = df.with_columns([
         (pl.col("PathDeviation") / 1000 / 60).alias("path_deviation_minutes"),
 
-        (pl.col("DeltaArrivalTime")).alias("delta_arrival_ms"),
+        (pl.col("DeltaArrivalTime") / 1000 / 60).alias("delta_arrival_minutes"),
 
         pl.col("MissedDeadline").cast(pl.Boolean).alias("missed_deadline"),
     ]).select([
         "day", "weekday_name", "simtime_ms", "time_label",
         "ExpectedArrivalTime", "ActualArrivalTime",
-        "path_deviation_minutes", "delta_arrival_ms", "missed_deadline",
+        "path_deviation_minutes", "delta_arrival_minutes", "missed_deadline",
     ]).sort(["day", "simtime_ms"])
 
     out_analysis = OUTPUT_ROOT / run_id / "analysis"
@@ -67,7 +67,7 @@ def analyse_arrival(parquet_path: Path, run_id: str) -> None:
             ]
             + [pl.col("path_deviation_minutes").quantile(q).alias(f"path_deviation_minutes_p{int(q * 100)}")
                for q in percentiles]
-            + [pl.col("delta_arrival_ms").quantile(q).alias(f"delta_arrival_s_p{int(q * 100)}")
+            + [pl.col("delta_arrival_minutes").quantile(q).alias(f"delta_arrival_minutes_p{int(q * 100)}")
                for q in percentiles]
         )
         .sort(["weekday_name", "simtime_ms"])
