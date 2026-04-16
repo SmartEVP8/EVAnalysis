@@ -38,9 +38,9 @@ class RunPaths:
             station_metrics=run_dir / "StationSnapshotMetric.parquet",
             charger_metrics=run_dir / "ChargerSnapshotMetric.parquet",
             arrival_metrics=run_dir / "ArrivalAtDestinationMetric.parquet",
-            analysis_dir=analysis_dir,
             station_snapshots=analysis_dir / "station_snapshots.parquet",
             stations_locations=Path("data/stations_locations.parquet"),
+            analysis_dir=analysis_dir,
         )
 
 
