@@ -52,12 +52,17 @@ def interpolate_grid(
     grid_coords = to_cartesian(grid_lats.flatten(), grid_lons.flatten())
 
     tree = KDTree(station_coords)
-    indices = tree.query(grid_coords, k=k, distance_upper_bound=max_dist_km)
-
+    dists, indices = tree.query(grid_coords, k=k, distance_upper_bound=max_dist_km)
+    
     # Map the station values to the grid. We add a '0.0' at the end of our values.
     # The KDTree returns an index pointing to this extra zero if no station is found within max_dist_km.
     padded_values = np.append(values, 0.0)
-    raster_flat = padded_values[indices]
+    neighbor_values = padded_values[indices]
+
+    if k == 1:
+        raster_flat = neighbor_values
+    else:
+        raster_flat = np.mean(neighbor_values, axis=1)
 
     # Reshape the flat list of results back into the 2D shape of our map
     return raster_flat.reshape(grid_lats.shape)

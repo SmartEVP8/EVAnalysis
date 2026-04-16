@@ -116,8 +116,7 @@ def load_heatmap_data(
 
     dataset = HeatmapDataset()
 
-    # Group the table into individual frames based on time
-    for sid, frame in joined.group_by("snapshot_id", maintain_order=True):
+    for (sid,), frame in joined.group_by("snapshot_id", maintain_order=True):
         dataset.snapshots.append(SnapshotFrame(sid, frame))
 
     return dataset
