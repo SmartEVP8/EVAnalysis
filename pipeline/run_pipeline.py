@@ -107,4 +107,4 @@ class PipelineRunner:
 
         self.run_analysis()
         process_outliers(self.run_id)
-        # self.run_heatmaps()
+        self.run_heatmaps()

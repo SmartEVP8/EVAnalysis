@@ -39,8 +39,8 @@ def detect_outliers(
         ranges_df = (
             df.group_by(group_cols)
             .agg([
-                pl.col(metric).quantile(0.25).alias("p25"),
-                pl.col(metric).quantile(0.75).alias("p75"),
+                pl.col(metric).cast(pl.Float32).quantile(0.25).alias("p25"),
+                pl.col(metric).cast(pl.Float32).quantile(0.75).alias("p75"),
             ])
             .with_columns(
                 (pl.col("p75") - pl.col("p25")).alias("interquartile_range")
@@ -52,7 +52,8 @@ def detect_outliers(
         )
 
         outliers = (
-            df.join(ranges_df, on=group_cols)
+            df.with_columns(pl.col(metric).cast(pl.Float32))
+            .join(ranges_df, on=group_cols)
             .filter(
                 (pl.col(metric) > pl.col("upper")) | (pl.col(metric) < pl.col("lower"))
             )
