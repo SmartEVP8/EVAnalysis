@@ -42,11 +42,11 @@ def analyse_charger(parquet_path: Path, run_id: str) -> None:
 
     snapshot_df = df.select([
         "StationId", "ChargerId",
-        "day", "weekday_idx", "weekday_name",
-        "time_of_day", "time_label",
+        "day", "weekday_name",
+        "simtime_ms", "time_label",
         "Utilization", "QueueSize",
         "DeliveredKW", "TargetEVDemandKW",
-    ]).sort(["StationId", "ChargerId", "day", "time_of_day"])
+    ]).sort(["StationId", "ChargerId", "day", "simtime_ms"])
 
     snapshot_df.write_parquet(out_analysis / "charger_snapshots.parquet")
 
@@ -58,7 +58,7 @@ def analyse_charger(parquet_path: Path, run_id: str) -> None:
     # Calculate percentiles grouped by time of day and weekday
     percentile_df = (
         snapshot_df
-        .group_by(["weekday_name", "time_of_day", "time_label"])
+        .group_by(["weekday_name", "simtime_ms", "time_label"])
         .agg(
             [pl.col("Utilization").quantile(q).alias(f"utilization_p{int(q*100)}")
              for q in PERCENTILES]
@@ -66,7 +66,7 @@ def analyse_charger(parquet_path: Path, run_id: str) -> None:
             [pl.col("QueueSize").quantile(q).alias(f"queue_size_p{int(q*100)}")
              for q in PERCENTILES]
         )
-        .sort(["weekday_name", "time_of_day"])
+        .sort(["weekday_name", "simtime_ms"])
     )
 
     out_path = out_percentiles / "charger_percentiles.parquet"

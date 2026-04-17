@@ -17,7 +17,7 @@ class Snap:
     QUEUE = "total_queue_size"
     CANCELLATION = "cancellation_rate"
     DAY = "day"
-    TIME = "time_of_day"
+    TIME = "simtime_ms"
 
 
 class Station:
@@ -98,6 +98,9 @@ def load_heatmap_data(
         Snap.UTILIZATION,
         Snap.QUEUE,
         Snap.CANCELLATION,
+        "weekday_name",
+        "day",
+        "time_label",
     ])
 
     stations_df = stations_df.select([

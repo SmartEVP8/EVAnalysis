@@ -11,7 +11,7 @@ from tqdm import tqdm
 
 from visualisation.heatmaps.inverse_distance_weighting import interpolate_grid
 from .denmark import DenmarkGrid, build_land_mask, load_denmark_boundary
-from .heatmaps_loader import HeatmapDataset
+from .heatmaps_loader import HeatmapDataset, SnapshotFrame
 
 METRICS: list[tuple[str, str]] = [
     ("queue_size", "total_queue_size"),
@@ -52,33 +52,11 @@ _METRIC_DISPLAY_NAMES: dict[str, str] = {
 # The dark-mode background color (matches the aesthetics of modern dashboards)
 BG = "#0b0f14"
 
-def decode_snapshot(snapshot_id: int) -> tuple[int, str]:
-    """
-    Breaks our custom snapshot ID back down into human-readable time.
 
-    Returns:
-        tuple: (Day number, "HH:MM" timestamp)
-    """
-    day = snapshot_id // 1_000_000
-    total_seconds = snapshot_id % 1_000_000
-    hours = int(total_seconds // 3600)
-    minutes = int((total_seconds % 3600) // 60)
-
-    return day, f"{hours:02d}:{minutes:02d}"
-
-
-def format_title(metric_name: str, snapshot_id: int) -> str:
-    """
-    Creates a descriptive title for the map image.
-    Example: 'Monday, Day 1 of simulation, 08:30, Utilization'
-    """
-    day, time_str = decode_snapshot(snapshot_id)
-    weekday = _WEEKDAYS[day % 7]
-    metric_display = _METRIC_DISPLAY_NAMES.get(
-        metric_name,
-        metric_name.replace("_", " ").title()
-    )
-    return f"{weekday}, Day {day} of simulation, {time_str}, {metric_display}"
+def format_title(metric_name: str, snap: SnapshotFrame) -> str:
+    row = snap.data.row(0, named=True)
+    metric_display = _METRIC_DISPLAY_NAMES.get(metric_name, metric_name.replace("_", " ").title())
+    return f"{row['weekday_name']}, Day {row['day']} of simulation, {row['time_label']}, {metric_display}"
 
 
 def render_all(
@@ -166,7 +144,7 @@ def render_all(
             cb.ax.yaxis.set_tick_params(color="white", labelcolor="white")
             cb.outline.set_edgecolor("#444444")
 
-            title = format_title(metric_name, snap.snapshot_id)
+            title = format_title(metric_name, snap)
             ax.text(
                 0.5,
                 0.985,

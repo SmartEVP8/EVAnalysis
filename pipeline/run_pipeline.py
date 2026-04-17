@@ -4,89 +4,100 @@ Defines the main execution pipeline for the EVAnalysis project.
 Coordinates the flow from raw parquet metrics to statistical analysis and final heatmaps.
 """
 
+from dataclasses import dataclass
 from pathlib import Path
 
 from analysis.metrics_analyser.station_metrics_analyser import analyse_station
 from analysis.metrics_analyser.charger_metrics_analyser import analyse_charger
+from analysis.metrics_analyser.arrival_metrics_analyser import analyse_arrival
 from analysis.detect_outliers.outlier_analyser import process_outliers
 from visualisation.heatmaps.heatmaps_loader import load_heatmap_data
 from visualisation.heatmaps.renderer import render_all
 
 
+@dataclass(frozen=True)
+class RunPaths:
+    """
+    All file paths associated with a single simulation run.
+    """
+    run_dir: Path
+    station_metrics: Path
+    charger_metrics: Path
+    arrival_metrics: Path
+
+    analysis_dir: Path
+    station_snapshots: Path
+
+    stations_locations: Path
+
+    @classmethod
+    def from_run_dir(run_paths: RunPaths, run_dir: Path) -> "RunPaths":
+        analysis_dir = Path("runs") / run_dir.name / "analysis"
+        return run_paths(
+            run_dir=run_dir,
+            station_metrics=run_dir / "StationSnapshotMetric.parquet",
+            charger_metrics=run_dir / "ChargerSnapshotMetric.parquet",
+            arrival_metrics=run_dir / "ArrivalAtDestinationMetric.parquet",
+            station_snapshots=analysis_dir / "station_snapshots.parquet",
+            stations_locations=Path("data/stations_locations.parquet"),
+            analysis_dir=analysis_dir,
+        )
+
+
 class PipelineRunner:
     """
-    Orchestrates the data processing and visualization pipeline for a specific simulation run.
-    
-    This class manages file paths, triggers metric analysis for stations and chargers,
-    and handles the generation of spatial heatmaps based on the processed results.
-
-    Attributes:
-        run_dir (Path): The directory containing the raw simulation outputs (Perkuet/{run_id} in SmartEV).
-        run_id (str): The unique name of the run (derived from the directory name).
-        station_metrics (Path): Path to the raw station-level metric parquet.
-        charger_metrics (Path): Path to the raw charger-level metric parquet.
-        analysis_dir (Path): The target directory for processed analysis files.
-        station_analysis (Path): Path to the cleaned station snapshot file.
-        stations_locations (Path): Path to the static station geographic coordinates.
+    Orchestrates the data processing and visualisation pipeline for a simulation run.
     """
 
     def __init__(self, run_dir: Path):
         """
-        Initializes the PipelineRunner with necessary file paths.
-
         Args:
-            run_dir (Path): The directory where the simulation raw data is stored (Perkuet/{run_id} in SmartEV).
+            run_dir: Directory containing the raw simulation outputs
+                     (Perkuet/{run_id} inside the SmartEV repo).
         """
-        self.run_dir = run_dir
         self.run_id = run_dir.name
+        self.paths = RunPaths.from_run_dir(run_dir)
 
-        # Define input file paths
-        self.station_metrics = run_dir / "StationSnapshotMetric.parquet"
-        self.charger_metrics = run_dir / "ChargerSnapshotMetric.parquet"
 
-        # Define output and reference paths
-        self.analysis_dir = Path("runs") / self.run_id / "analysis"
-        self.station_analysis = self.analysis_dir / "station_snapshots.parquet"
-        self.stations_locations = Path("data/stations_locations.parquet")
+    def file_exists(self, path: Path, description: str) -> bool:
+        if not path.exists():
+            raise FileNotFoundError(f"{description} not found at {path}")
+            
+        return True
 
-    def run_analysis(self):
+
+    def run_analysis(self) -> None:
+        """Runs metric analysis for stations, chargers, and EV arrivals."""
+        p = self.paths
+
+        if self.file_exists(p.station_metrics, "Station metrics"):
+            analyse_station(p.station_metrics, self.run_id)
+
+        if self.file_exists(p.charger_metrics, "Charger metrics"):
+            analyse_charger(p.charger_metrics, self.run_id)
+
+        if self.file_exists(p.arrival_metrics, "Arrival metrics"):
+            analyse_arrival(p.arrival_metrics, self.run_id)
+
+
+    def run_outlier_detection(self) -> None:
+        """Flags statistical outliers in the processed snapshot data."""
+        process_outliers(self.run_id)
+
+
+    def run_heatmaps(self) -> None:
         """
-        Executes the statistical analysis for both stations and chargers.
+        Renders spatial heatmaps from the analysed station snapshots.
         """
-        if self.station_metrics.exists():
-            analyse_station(self.station_metrics, self.run_id)
-        else:
-            print(f"Missing station raw parquet at {self.station_metrics}")
+        p = self.paths
 
-        if self.charger_metrics.exists():
-            analyse_charger(self.charger_metrics, self.run_id)
-        else:
-            print(f"Missing charger raw parquet at {self.charger_metrics}")
+        self.file_exists(p.station_snapshots, "Station snapshots")
 
-    def run_heatmaps(self):
-        """
-        Generates spatial visualizations based on the analyzed station data.
-
-        This method loads the processed snapshots, joins them with geographic 
-        location data, and renders heatmap images.
-
-        Raises:
-            FileNotFoundError: If no station analysis has been performed, or if
-            station analysis has been saved incorrectly.
-        """
-        if not self.station_analysis.exists():
-            raise FileNotFoundError(
-                f"Missing analysis output: {self.station_analysis}. "
-                "Ensure run_analysis() is called before run_heatmaps()."
-            )
-
-        # Merge snapshot data with geographic coordinates
         dataset = load_heatmap_data(
-            snapshots_path=self.station_analysis,
-            stations_path=self.stations_locations,
+            snapshots_path=p.station_snapshots,
+            stations_path=p.stations_locations,
         )
 
-        # Trigger the rendering engine with specific spatial parameters
         render_all(
             dataset,
             output_dir=Path("runs") / self.run_id / "heatmaps",
@@ -95,16 +106,11 @@ class PipelineRunner:
             dpi=150,
         )
 
-    def run_all(self):
-        """
-        A convenience method to execute the full end-to-end pipeline.
-        
-        Prints the Run ID and source directory for logging purposes before 
-        starting the analysis and visualization phases.
-        """
+
+    def run_all(self) -> None:
         print(f"Run ID: {self.run_id}")
-        print(f"Source: {self.run_dir}")
+        print(f"Source: {self.paths.run_dir}")
 
         self.run_analysis()
-        process_outliers(self.run_id)
-        # self.run_heatmaps()
+        self.run_outlier_detection()
+        self.run_heatmaps()

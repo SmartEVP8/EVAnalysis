@@ -30,6 +30,14 @@ STATION_SCHEMA: dict[str, pl.DataType] = {
     "Cancellations":     pl.UInt32,
 }
 
+ARRIVE_AT_DESTINATION_SCHEMA: dict[str, pl.DataType] = {
+    "ExpectedArrivalTime":      pl.UInt32,
+    "ActualArrivalTime":        pl.UInt32,
+    "PathDeviation":            pl.Int32,
+    "DeltaArrivalTime":         pl.Int32,
+    "MissedDeadline":           pl.Boolean,
+}
+
 def validate_schema(df: pl.DataFrame, expected: dict[str, pl.DataType], label: str) -> None:
     """
     Acts as a quality control check for incoming DataFrames.

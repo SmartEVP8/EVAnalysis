@@ -56,14 +56,14 @@ def analyse_station(parquet_path: Path, run_id: str) -> None:
               .alias("cancellation_rate"),
         ])
         .select([
-            "StationId", "day", "weekday_idx", "weekday_name", "time_of_day", 
+            "StationId", "day", "weekday_name", "simtime_ms", 
             "time_label", "utilization", "total_queue_size", "Price", 
             "Reservations", "Cancellations", "cancellation_rate", "TotalChargers",
         ])
     )
 
     snapshot_df = snapshot_df.sort(
-        ["StationId", "day", "time_of_day"]
+        ["StationId", "day", "simtime_ms"]
     )
     snapshot_df.write_parquet(out_analysis / "station_snapshots.parquet")
 
@@ -75,7 +75,7 @@ def analyse_station(parquet_path: Path, run_id: str) -> None:
     # Aggregate percentiles across all stations to see network-wide trends
     percentile_df = (
         snapshot_df
-        .group_by(["weekday_name", "time_of_day", "time_label"])
+        .group_by(["weekday_name", "simtime_ms", "time_label"])
         .agg(
             [pl.col("utilization").quantile(q).alias(f"utilization_p{int(q*100)}")
              for q in PERCENTILES]
@@ -86,7 +86,7 @@ def analyse_station(parquet_path: Path, run_id: str) -> None:
             [pl.col("Price").quantile(q).alias(f"price_p{int(q*100)}")
              for q in PERCENTILES]
         )
-        .sort(["weekday_name", "time_of_day"])
+        .sort(["weekday_name", "simtime_ms"])
     )
 
     out_path = out_percentiles / "station_percentiles.parquet"
