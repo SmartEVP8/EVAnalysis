@@ -31,9 +31,9 @@ class RunPaths:
     stations_locations: Path
 
     @classmethod
-    def from_run_dir(cls, run_dir: Path) -> "RunPaths":
+    def from_run_dir(run_paths: RunPaths, run_dir: Path) -> "RunPaths":
         analysis_dir = Path("runs") / run_dir.name / "analysis"
-        return cls(
+        return run_paths(
             run_dir=run_dir,
             station_metrics=run_dir / "StationSnapshotMetric.parquet",
             charger_metrics=run_dir / "ChargerSnapshotMetric.parquet",
