@@ -98,6 +98,9 @@ def load_heatmap_data(
         Snap.UTILIZATION,
         Snap.QUEUE,
         Snap.CANCELLATION,
+        "weekday_name",
+        "day",
+        "time_label",
     ])
 
     stations_df = stations_df.select([
