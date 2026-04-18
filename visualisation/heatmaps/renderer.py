@@ -97,25 +97,33 @@ def render_all(
 
             try:
                 lats, lons, values = snap.metric_arrays(col_name)
+                has_data = len(values) > 0
             except Exception:
-                continue
+                has_data = False
 
-            if len(values) == 0:
-                continue
+            if has_data:
+                raster = interpolate_grid(
+                    lats, lons, values,
+                    grid.lat_grid,
+                    grid.lon_grid,
+                )
+                if land_mask is not None:
+                    raster[~land_mask] = np.nan
+                raster = np.nan_to_num(raster, nan=0.0)
+            else:
+                raster = np.zeros_like(grid.lat_grid)
 
-            raster = interpolate_grid(
-                lats, lons, values,
-                grid.lat_grid,
-                grid.lon_grid,
-            )
+            lat_range = grid.lat_max - grid.lat_min
+            lon_range = grid.lon_max - grid.lon_min
+            lat_correction = np.cos(np.radians(56.0))
+            fig_w = 8.0
+            fig_h = fig_w * (lat_range / lon_range) / lat_correction
 
-            if land_mask is not None:
-                raster[~land_mask] = np.nan
-
-            raster = np.nan_to_num(raster, nan=0.0)
-
-            fig, ax = plt.subplots(figsize=(8, 8), facecolor=BG)
+            fig, ax = plt.subplots(figsize=(fig_w, fig_h), facecolor=BG)
             ax.set_facecolor(BG)
+            ax.margins(0)
+            ax.set_xlim(grid.lon_min, grid.lon_max)
+            ax.set_ylim(grid.lat_min, grid.lat_max)
 
             # Draw the heatmap
             im = ax.imshow(
@@ -126,6 +134,7 @@ def render_all(
                 vmin=config["vmin"],
                 vmax=config["vmax"],
                 interpolation="sinc",
+                aspect="auto",
             )
 
             dk_boundary.boundary.plot(
@@ -135,11 +144,10 @@ def render_all(
                 zorder=3,
             )
 
-            divider = make_axes_locatable(ax)
-            cax = divider.append_axes("right", size="4%", pad=0.10)
-            cax.set_facecolor(BG)
+            cbar_ax = fig.add_axes([0.92, 0.1, 0.05, 0.78])
+            cbar_ax.set_facecolor(BG)
 
-            cb = fig.colorbar(im, cax=cax)
+            cb = fig.colorbar(im, cax=cbar_ax)
             cb.set_label(config["colorbar_label"], color="white", fontsize=9)
             cb.ax.yaxis.set_tick_params(color="white", labelcolor="white")
             cb.outline.set_edgecolor("#444444")
@@ -151,7 +159,7 @@ def render_all(
                 title,
                 transform=ax.transAxes,
                 color="white",
-                fontsize=8.5,
+                fontsize=14,
                 va="top",
                 ha="center",
                 alpha=0.85,
