@@ -12,12 +12,12 @@ import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 import matplotlib.image as mpimg
 
-import visualisation.dashboards.charts.arrival_delay_histogram as arrivals_distribution
-import visualisation.dashboards.charts.cancellation_rate_bar as cancellation_distribution
+import visualisation.dashboards.charts.arrival_delay_diagram as arrivals_distribution
+import visualisation.dashboards.charts.cancellation_rate_diagram as cancellation_distribution
 import visualisation.dashboards.charts.outlier_diagram as outliers_distribution
-import visualisation.dashboards.charts.price_distribution as price_distribution
-import visualisation.dashboards.charts.station_utilization_bar as utilization_distribution
-import visualisation.dashboards.charts.station_queue_bar as queue_size_distribution
+import visualisation.dashboards.charts.price_diagram as price_diagram
+import visualisation.dashboards.charts.station_utilization_diagram as utilization_distribution
+import visualisation.dashboards.charts.station_queue_diagram as queue_size_distribution
 
 
 BG = "#0f1117"
@@ -133,7 +133,7 @@ def render_dashboard(
     distribution_grid = gridspec.GridSpecFromSubplotSpec(1, 3, subplot_spec=figure_grid[2], wspace=0.08)
     utilization_distribution.render(figure.add_subplot(distribution_grid[0]),  station_snapshot_df, simtime_ms)
     queue_size_distribution.render(figure.add_subplot(distribution_grid[1]), station_snapshot_df, simtime_ms)
-    price_distribution.render(figure.add_subplot(distribution_grid[2]), station_snapshot_df, simtime_ms)
+    price_diagram.render(figure.add_subplot(distribution_grid[2]), station_snapshot_df, simtime_ms)
 
     # Row 3
     distribution_grid_2 = gridspec.GridSpecFromSubplotSpec(1, 3, subplot_spec=figure_grid[3], wspace=0.08)
