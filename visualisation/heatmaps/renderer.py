@@ -119,14 +119,14 @@ def render_all(
             fig_w = 8.0
             fig_h = fig_w * (lat_range / lon_range) / lat_correction
 
-            fig, ax = plt.subplots(figsize=(fig_w, fig_h), facecolor=BG)
-            ax.set_facecolor(BG)
-            ax.margins(0)
-            ax.set_xlim(grid.lon_min, grid.lon_max)
-            ax.set_ylim(grid.lat_min, grid.lat_max)
+            fig, axes = plt.subplots(figsize=(fig_w, fig_h), facecolor=BG)
+            axes.set_facecolor(BG)
+            axes.margins(0)
+            axes.set_xlim(grid.lon_min, grid.lon_max)
+            axes.set_ylim(grid.lat_min, grid.lat_max)
 
             # Draw the heatmap
-            im = ax.imshow(
+            im = axes.imshow(
                 raster,
                 extent=extent,
                 origin="lower",
@@ -138,26 +138,26 @@ def render_all(
             )
 
             dk_boundary.boundary.plot(
-                ax=ax,
+                ax=axes,
                 linewidth=0.8,
                 color="#b5b5b5",
                 zorder=3,
             )
 
-            cbar_ax = fig.add_axes([0.92, 0.1, 0.05, 0.78])
-            cbar_ax.set_facecolor(BG)
+            colorbar_axes = fig.add_axes([0.92, 0.1, 0.05, 0.78])
+            colorbar_axes.set_facecolor(BG)
 
-            cb = fig.colorbar(im, cax=cbar_ax)
-            cb.set_label(config["colorbar_label"], color="white", fontsize=9)
-            cb.ax.yaxis.set_tick_params(color="white", labelcolor="white")
-            cb.outline.set_edgecolor("#444444")
+            colorbar = fig.colorbar(im, cax=colorbar_axes)
+            colorbar.set_label(config["colorbar_label"], color="white", fontsize=9)
+            colorbar.ax.yaxis.set_tick_params(color="white", labelcolor="white")
+            colorbar.outline.set_edgecolor("#444444")
 
             title = format_title(metric_name, snap)
-            ax.text(
+            axes.text(
                 0.5,
                 0.985,
                 title,
-                transform=ax.transAxes,
+                transform=axes.transAxes,
                 color="white",
                 fontsize=14,
                 va="top",
@@ -165,7 +165,7 @@ def render_all(
                 alpha=0.85,
             )
 
-            ax.set_axis_off()
+            axes.set_axis_off()
 
             fig.savefig(
                 out_path,
