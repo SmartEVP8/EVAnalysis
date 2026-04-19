@@ -1,36 +1,41 @@
+"""
+Utilization distribution as a step-line across all stations at a single snapshot moment.
+"""
+import polars as pl
 import matplotlib.pyplot as plt
 import numpy as np
 
-BG       = "#0f1117"
 PANEL_BG = "#1a1d27"
 ACCENT   = "#4fc3f7"
-ACCENT3  = "#e57373"
 TEXT     = "#e8eaf6"
 SUBTEXT  = "#9fa8da"
 BORDER   = "#2a2d3e"
 
 
-def render(df, simtime_ms):
-    fig, ax = plt.subplots(figsize=(6, 4), facecolor=PANEL_BG)
-    ax.set_facecolor(PANEL_BG)
+def render(axes: plt.Axes, station_snapshots: pl.DataFrame, simtime_ms: int) -> None:
+    axes.set_facecolor(PANEL_BG)
+    for border in axes.spines.values():
+        border.set_edgecolor(BORDER)
 
-    if df.is_empty() or "utilization" not in df.columns:
-        ax.text(0.5, 0.5, "No data",
-                ha="center", va="center", color=SUBTEXT)
-        return fig
+    dataframe = station_snapshots.filter(pl.col("simtime_ms") == simtime_ms)
 
-    values = df["utilization"].to_numpy()
+    if dataframe.is_empty() or "utilization" not in dataframe.columns:
+        axes.text(0.5, 0.5, "No utilization data", horizontalalignment="center", verticalalignment="center",
+                transform=axes.transAxes, color=SUBTEXT, fontsize=11, style="italic")
+        axes.set_xticks([])
+        axes.set_yticks([])
+        return
 
-    values = np.clip(values, 0, 1)
+    utilization_values = np.clip(dataframe["utilization"].drop_nulls().to_numpy(), 0, 1)
+    counts, edges = np.histogram(utilization_values, bins=20, range=(0.0, 1.0))
+    centres = (edges[:-1] + edges[1:]) / 2
 
-    bins = np.linspace(0, 1, 21)
+    axes.plot(centres, counts, color=ACCENT, linewidth=1.4, zorder=3)
+    axes.fill_between(centres, counts, alpha=0.15, color=ACCENT, zorder=2)
 
-    ax.hist(values, bins=bins, color=ACCENT, edgecolor="#000000", alpha=0.85)
-
-    ax.set_title("Utilization Distribution", color=TEXT, fontsize=12)
-    ax.set_xlabel("Utilization", color=SUBTEXT)
-    ax.set_ylabel("# Stations", color=SUBTEXT)
-
-    ax.tick_params(colors=SUBTEXT)
-
-    return fig
+    axes.set_title("Utilization Distribution", color=TEXT, fontsize=12, pad=6)
+    axes.set_xlabel("Utilization", color=SUBTEXT, fontsize=9)
+    axes.set_ylabel("Number of Stations", color=SUBTEXT, fontsize=9)
+    axes.set_xlim(0.0, 1.0)
+    axes.tick_params(colors=SUBTEXT, labelsize=8)
+    axes.grid(axis="y", color=BORDER, linewidth=0.5, zorder=1)

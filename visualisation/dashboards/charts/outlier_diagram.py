@@ -1,95 +1,62 @@
 """
-Dot plot showing stations flagged as outliers at a single snapshot moment,
-with their observed value plotted against the IQR bounds.
+Outlier deviation distribution as step-lines for HIGH and LOW outliers.
 """
 import polars as pl
 import matplotlib.pyplot as plt
 import numpy as np
 
-BG       = "#0f1117"
 PANEL_BG = "#1a1d27"
-ACCENT   = "#4fc3f7"
-ACCENT3  = "#e57373"
-ACCENT2  = "#81c784"
+ACCENT  = "#b54707"
+ACCENT2   = "#e57373"
 TEXT     = "#e8eaf6"
 SUBTEXT  = "#9fa8da"
 BORDER   = "#2a2d3e"
 
 
-def render(
-    station_outliers: pl.DataFrame,
-    simtime_ms: int,
-    figsize: tuple[float, float] = (7, 3.5),
-) -> plt.Figure:
-    """
-    Render a dot plot of outlier stations at the given simtime_ms.
-    Each point shows the station's observed value; horizontal bars show
-    the IQR [p25, p75] and whisker [lower, upper] bounds for context.
+def render(axes: plt.Axes, station_outliers: pl.DataFrame, simtime_ms: int) -> None:
+    axes.set_facecolor(PANEL_BG)
+    for border in axes.spines.values():
+        border.set_edgecolor(BORDER)
 
-    Parameters
-    ----------
-    station_outliers:
-        Full station_outliers.parquet loaded as a Polars DataFrame.
-    simtime_ms:
-        The simulation timestamp to filter to.
-    figsize:
-        Figure dimensions in inches.
-    """
-    df = (
+    dataframe = (
         station_outliers
         .filter(pl.col("simtime_ms") == simtime_ms)
-        .sort("value", descending=True)
+        .with_columns(
+            pl.when(pl.col("flag") == "HIGH")
+              .then(pl.col("value") - pl.col("upper"))
+              .otherwise(pl.col("lower") - pl.col("value"))
+              .alias("deviation")
+        )
     )
 
-    if df.is_empty():
-        fig, ax = plt.subplots(figsize=figsize, facecolor=BG)
-        ax.set_facecolor(PANEL_BG)
-        ax.text(0.5, 0.5, "No outliers at this snapshot ✓",
-                ha="center", va="center", transform=ax.transAxes,
-                color=ACCENT2, fontsize=12, style="italic")
-        ax.set_axis_off()
-        return fig
+    if dataframe.is_empty():
+        axes.text(0.5, 0.5, "No outliers at this snapshot", horizontalalignment="center", verticalalignment="center",
+                transform=axes.transAxes, color=ACCENT2, fontsize=11, style="italic")
+        axes.set_xticks([])
+        axes.set_yticks([])
+        return
 
-    labels = [f"S{row['StationId']} ({row['metric']})" for row in df.iter_rows(named=True)]
-    values = df["value"].to_list()
-    uppers = df["upper"].to_list()
-    p75s   = df["p75"].to_list()
-    flags  = df["flag"].to_list()
+    deviations_high = dataframe.filter(pl.col("flag") == "HIGH")["deviation"].to_numpy()
+    deviations_low  = dataframe.filter(pl.col("flag") == "LOW")["deviation"].to_numpy()
 
-    fig, ax = plt.subplots(figsize=figsize, facecolor=BG)
-    ax.set_facecolor(PANEL_BG)
+    deviations_all = np.concatenate([deviations_high, deviations_low])
+    deviation_largest  = float(deviations_all.max()) if len(deviations_all) > 0 else 1.0
+    n_bins   = min(20, max(5, len(deviations_all) // 2))
 
-    y = np.arange(len(labels))
+    def step_line(data, color, label):
+        if len(data) == 0:
+            return
+        counts, edges = np.histogram(data, bins=n_bins, range=(0, deviation_largest))
+        centres = (edges[:-1] + edges[1:]) / 2
+        axes.plot(centres, counts, color=color, linewidth=1.4, zorder=3, label=label)
+        axes.fill_between(centres, counts, alpha=0.15, color=color, zorder=2)
 
-    # Draw the upper whisker as a faint reference line
-    for i, (u, p) in enumerate(zip(uppers, p75s)):
-        ax.plot([p, u], [y[i], y[i]], color=BORDER, linewidth=2.0, solid_capstyle="round", zorder=1)
+    step_line(deviations_high, ACCENT, f"HIGH ({len(deviations_high)})")
+    step_line(deviations_low,  ACCENT2,  f"LOW ({len(deviations_low)})")
 
-    # Draw observed value dot
-    dot_colors = [ACCENT3 if f == "HIGH" else ACCENT for f in flags]
-    ax.scatter(values, y, color=dot_colors, s=40, zorder=3)
-
-    ax.set_yticks(y)
-    ax.set_yticklabels(labels, color=SUBTEXT, fontsize=7)
-    ax.set_xlabel("Metric value", color=SUBTEXT, fontsize=9)
-    ax.set_title("Station Outliers at This Snapshot", color=TEXT, fontsize=11, pad=6)
-    ax.tick_params(axis="x", colors=SUBTEXT, labelsize=8)
-
-    for spine in ax.spines.values():
-        spine.set_edgecolor(BORDER)
-    ax.grid(axis="x", color=BORDER, linewidth=0.5, zorder=0)
-
-    # Legend
-    from matplotlib.lines import Line2D
-    legend_elements = [
-        Line2D([0], [0], marker="o", color="w", markerfacecolor=ACCENT3,
-               markersize=6, label="HIGH outlier"),
-        Line2D([0], [0], marker="o", color="w", markerfacecolor=ACCENT,
-               markersize=6, label="LOW outlier"),
-        Line2D([0], [0], color=BORDER, linewidth=2, label="IQR → upper bound"),
-    ]
-    ax.legend(handles=legend_elements, fontsize=7, facecolor=PANEL_BG,
-              labelcolor=SUBTEXT, edgecolor=BORDER)
-
-    fig.tight_layout()
-    return fig
+    axes.set_title("Outlier Deviation Distribution", color=TEXT, fontsize=12, pad=6)
+    axes.set_xlabel("Deviation beyond IQR fence", color=SUBTEXT, fontsize=9)
+    axes.set_ylabel("Number of Stations", color=SUBTEXT, fontsize=9)
+    axes.tick_params(colors=SUBTEXT, labelsize=8)
+    axes.grid(axis="y", color=BORDER, linewidth=0.5, zorder=1)
+    axes.legend(fontsize=7, facecolor=PANEL_BG, labelcolor=SUBTEXT, edgecolor=BORDER)

@@ -1,90 +1,57 @@
 """
-Bar chart showing cancellation rate per station at a single snapshot moment,
-with raw reservation and cancellation counts annotated.
+Cancellation rate distribution as a step-line across all stations at a single snapshot moment.
 """
 import polars as pl
 import matplotlib.pyplot as plt
 import numpy as np
 
-BG       = "#0f1117"
 PANEL_BG = "#1a1d27"
-ACCENT   = "#4fc3f7"
-ACCENT3  = "#e57373"
-ACCENT2  = "#81c784"
+ACCENT  = "#81c784"
 TEXT     = "#e8eaf6"
 SUBTEXT  = "#9fa8da"
 BORDER   = "#2a2d3e"
 
 
-def render(
-    station_snapshots: pl.DataFrame,
-    simtime_ms: int,
-    figsize: tuple[float, float] = (7, 3.5),
-) -> plt.Figure:
-    """
-    Render a horizontal bar chart of cancellation_rate per station at simtime_ms.
-    Only stations with at least one reservation are shown (avoids 0/0 noise).
-    Bars are annotated with raw cancellation / reservation counts.
+def render(axes: plt.Axes, station_snapshots: pl.DataFrame, simtime_ms: int) -> None:
+    axes.set_facecolor(PANEL_BG)
+    for border in axes.spines.values():
+        border.set_edgecolor(BORDER)
 
-    Parameters
-    ----------
-    station_snapshots:
-        Full station_snapshots.parquet loaded as a Polars DataFrame.
-    simtime_ms:
-        The simulation timestamp to filter to.
-    figsize:
-        Figure dimensions in inches.
-    """
-    df = (
+    dataframe = (
         station_snapshots
         .filter(pl.col("simtime_ms") == simtime_ms)
-        .filter(pl.col("Reservations") > 0)   # only stations with bookings
-        .sort("cancellation_rate", descending=True)
+        .filter(pl.col("Reservations") > 0)
     )
 
-    if df.is_empty():
-        fig, ax = plt.subplots(figsize=figsize, facecolor=BG)
-        ax.set_facecolor(PANEL_BG)
-        ax.text(0.5, 0.5, "No reservations at this snapshot",
-                ha="center", va="center", transform=ax.transAxes,
-                color=SUBTEXT, fontsize=12, style="italic")
-        ax.set_axis_off()
-        return fig
+    if dataframe.is_empty() or "cancellation_rate" not in dataframe.columns:
+        axes.text(0.5, 0.5, "No reservations at this snapshot", horizontalalignment="center", verticalalignment="center",
+                transform=axes.transAxes, color=SUBTEXT, fontsize=11, style="italic")
+        axes.set_xticks([])
+        axes.set_yticks([])
+        return
+    
+    total_reservations  = int(dataframe["Reservations"].sum())
+    total_cancellations = int(dataframe["Cancellations"].sum())
 
-    station_ids   = [str(s) for s in df["StationId"].to_list()]
-    rates         = df["cancellation_rate"].to_list()
-    cancellations = df["Cancellations"].to_list()
-    reservations  = df["Reservations"].to_list()
+    axes.text(0.98, 0.95,
+              f"Reservations: {total_reservations}\nCancellations: {total_cancellations}",
+              horizontalalignment="right", verticalalignment="top",
+              transform=axes.transAxes,
+              color=SUBTEXT, fontsize=8, fontfamily="monospace")
 
-    colors = [ACCENT3 if r > 0.5 else ACCENT for r in rates]
+    cancellation_rate = dataframe["cancellation_rate"].to_numpy()
+    bins  = np.linspace(0.0, 1.0, 11)
 
-    fig, ax = plt.subplots(figsize=figsize, facecolor=BG)
-    ax.set_facecolor(PANEL_BG)
+    counts, edges = np.histogram(cancellation_rate, bins=bins)
+    centres = (edges[:-1] + edges[1:]) / 2
 
-    y = np.arange(len(station_ids))
-    ax.barh(y, rates, color=colors, height=0.65, zorder=2)
+    axes.plot(centres, counts, color=ACCENT, linewidth=1.4, zorder=3)
+    axes.fill_between(centres, counts, alpha=0.15, color=ACCENT, zorder=2)
 
-    # Annotate each bar with "X / Y" (cancellations / reservations)
-    for i, (rate, c, r) in enumerate(zip(rates, cancellations, reservations)):
-        ax.text(
-            rate + 0.01, i,
-            f"{c}/{r}",
-            va="center", color=SUBTEXT, fontsize=6.5,
-        )
-
-    # Reference line at 0.5
-    ax.axvline(0.5, color=ACCENT3, linewidth=0.8, linestyle="--", alpha=0.5, zorder=3)
-
-    ax.set_xlim(0, 1.15)
-    ax.set_yticks(y)
-    ax.set_yticklabels(station_ids, color=SUBTEXT, fontsize=7)
-    ax.set_xlabel("Cancellation rate", color=SUBTEXT, fontsize=9)
-    ax.set_title("Cancellation Rate per Station", color=TEXT, fontsize=11, pad=6)
-    ax.tick_params(axis="x", colors=SUBTEXT, labelsize=8)
-
-    for spine in ax.spines.values():
-        spine.set_edgecolor(BORDER)
-    ax.grid(axis="x", color=BORDER, linewidth=0.5, zorder=1)
-
-    fig.tight_layout()
-    return fig
+    axes.set_title("Cancellation Rate Distribution", color=TEXT, fontsize=12, pad=6)
+    axes.set_xlabel("Cancellation rate", color=SUBTEXT, fontsize=9)
+    axes.set_ylabel("Number of Stations", color=SUBTEXT, fontsize=9)
+    axes.set_xlim(0.0, 1.0)
+    axes.set_xticks(np.linspace(0.0, 1.0, 6))
+    axes.tick_params(colors=SUBTEXT, labelsize=8)
+    axes.grid(axis="y", color=BORDER, linewidth=0.5, zorder=1)

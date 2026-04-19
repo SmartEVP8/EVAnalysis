@@ -1,37 +1,44 @@
+"""
+Queue size distribution as a step-line across all stations at a single snapshot moment.
+"""
+import polars as pl
 import matplotlib.pyplot as plt
 import numpy as np
 
-BG       = "#0f1117"
 PANEL_BG = "#1a1d27"
-ACCENT2  = "#81c784"
-ACCENT3  = "#e57373"
+ACCENT = "#81c784"
 TEXT     = "#e8eaf6"
 SUBTEXT  = "#9fa8da"
 BORDER   = "#2a2d3e"
 
-def render(df, simtime_ms):
-    fig, ax = plt.subplots(figsize=(6, 4), facecolor=PANEL_BG)
-    ax.set_facecolor(PANEL_BG)
+QUEUE_COL = "total_queue_size"
 
-    if df.is_empty() or "queue_size" not in df.columns:
-        ax.text(0.5, 0.5, "No data",
-                ha="center", va="center", color=SUBTEXT)
-        return fig
 
-    values = df["queue_size"].to_numpy()
+def render(axes: plt.Axes, station_snapshots: pl.DataFrame, simtime_ms: int) -> None:
+    axes.set_facecolor(PANEL_BG)
+    for border in axes.spines.values():
+        border.set_edgecolor(BORDER)
 
-    # Optional: clamp to avoid crazy outliers ruining chart
-    values = np.clip(values, 0, 20)
+    dataframe = station_snapshots.filter(pl.col("simtime_ms") == simtime_ms)
 
-    bins = np.arange(0, 22)  # 0–21 edges → bars at integers
+    if dataframe.is_empty() or QUEUE_COL not in dataframe.columns:
+        missing = f"Column '{QUEUE_COL}' not found" if not dataframe.is_empty() else "No data"
+        axes.text(0.5, 0.5, missing, horizontalalignment="center", verticalalignment="center",
+                transform=axes.transAxes, color=SUBTEXT, fontsize=11, style="italic")
+        axes.set_xticks([])
+        axes.set_yticks([])
+        return
 
-    ax.hist(values, bins=bins, color=ACCENT2, edgecolor="#000000", alpha=0.85)
+    queue_size_values = np.clip(dataframe[QUEUE_COL].drop_nulls().to_numpy(), 0, 20)
+    counts, edges = np.histogram(queue_size_values, bins=20, range=(0, 20))
+    centres = (edges[:-1] + edges[1:]) / 2
 
-    ax.set_title("Queue Size Distribution", color=TEXT, fontsize=12)
-    ax.set_xlabel("Queue Size", color=SUBTEXT)
-    ax.set_ylabel("# Stations", color=SUBTEXT)
+    axes.plot(centres, counts, color=ACCENT, linewidth=1.4, zorder=3)
+    axes.fill_between(centres, counts, alpha=0.15, color=ACCENT, zorder=2)
 
-    ax.set_xticks(np.arange(0, 21, 2))
-    ax.tick_params(colors=SUBTEXT)
-
-    return fig
+    axes.set_title("Queue Size Distribution", color=TEXT, fontsize=12, pad=6)
+    axes.set_xlabel("Queue Size",  color=SUBTEXT, fontsize=9)
+    axes.set_ylabel("Number of Stations",  color=SUBTEXT, fontsize=9)
+    axes.set_xlim(0, 20)
+    axes.tick_params(colors=SUBTEXT, labelsize=8)
+    axes.grid(axis="y", color=BORDER, linewidth=0.5, zorder=1)

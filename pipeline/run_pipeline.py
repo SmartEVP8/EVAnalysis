@@ -13,6 +13,9 @@ from analysis.metrics_analyser.arrival_metrics_analyser import analyse_arrival
 from analysis.detect_outliers.outlier_analyser import process_outliers
 from visualisation.heatmaps.heatmaps_loader import load_heatmap_data
 from visualisation.heatmaps.renderer import render_all
+from visualisation.dashboards.generate_dashboards import render_dashboard
+
+import polars as pl
 
 
 @dataclass(frozen=True)
@@ -27,20 +30,33 @@ class RunPaths:
 
     analysis_dir: Path
     station_snapshots: Path
+    arrival_snapshots: Path
 
     stations_locations: Path
+
+    outlier_dir: Path
+    station_outliers: Path
+
+    heatmap_dir: Path
+    dashboard_dir: Path
 
     @classmethod
     def from_run_dir(run_paths: RunPaths, run_dir: Path) -> "RunPaths":
         analysis_dir = Path("runs") / run_dir.name / "analysis"
+        outlier_dir  = Path("runs") / run_dir.name / "outliers"
         return run_paths(
             run_dir=run_dir,
             station_metrics=run_dir / "StationSnapshotMetric.parquet",
             charger_metrics=run_dir / "ChargerSnapshotMetric.parquet",
             arrival_metrics=run_dir / "ArrivalAtDestinationMetric.parquet",
-            station_snapshots=analysis_dir / "station_snapshots.parquet",
-            stations_locations=Path("data/stations_locations.parquet"),
             analysis_dir=analysis_dir,
+            station_snapshots=analysis_dir / "station_snapshots.parquet",
+            arrival_snapshots=analysis_dir / "arrival_snapshots.parquet",
+            stations_locations=Path("data/stations_locations.parquet"),
+            outlier_dir=outlier_dir,
+            station_outliers=outlier_dir / "station_outliers.parquet",
+            heatmap_dir=Path("runs") / run_dir.name / "heatmaps",
+            dashboard_dir=Path("runs") / run_dir.name / "dashboards",
         )
 
 
@@ -62,7 +78,6 @@ class PipelineRunner:
     def file_exists(self, path: Path, description: str) -> bool:
         if not path.exists():
             raise FileNotFoundError(f"{description} not found at {path}")
-            
         return True
 
 
@@ -86,9 +101,7 @@ class PipelineRunner:
 
 
     def run_heatmaps(self) -> None:
-        """
-        Renders spatial heatmaps from the analysed station snapshots.
-        """
+        """Renders spatial heatmaps from the analysed station snapshots."""
         p = self.paths
 
         self.file_exists(p.station_snapshots, "Station snapshots")
@@ -100,11 +113,42 @@ class PipelineRunner:
 
         render_all(
             dataset,
-            output_dir=Path("runs") / self.run_id / "heatmaps",
+            output_dir=p.heatmap_dir,
             resolution_km=5.0,
             use_land_mask=True,
             dpi=150,
         )
+
+
+    def run_dashboards(self) -> None:
+        """Renders a per-snapshot dashboard image for the simulation run."""
+        p = self.paths
+
+        self.file_exists(p.station_snapshots, "Station snapshots")
+
+        snap_df    = pl.read_parquet(p.station_snapshots)
+        arrival_df = pl.read_parquet(p.arrival_snapshots) if p.arrival_snapshots.exists() else pl.DataFrame()
+        outlier_df = pl.read_parquet(p.station_outliers)  if p.station_outliers.exists()  else pl.DataFrame()
+
+        missed_pct = None
+        if not arrival_df.is_empty() and "missed_deadline" in arrival_df.columns:
+            missed_pct = arrival_df["missed_deadline"].mean() * 100
+
+        times = snap_df["simtime_ms"].unique().sort()
+        print(f"Generating {len(times)} dashboards...")
+
+        for i, t in enumerate(times, start=1):
+            render_dashboard(
+                run_id               = self.run_id,
+                station_snapshot_df  = snap_df,
+                arrival_snapshot_df  = arrival_df,
+                outlier_analysis_df  = outlier_df,
+                missed_deadlines_percent = missed_pct,
+                heatmap_directory    = p.heatmap_dir,
+                out_dir              = p.dashboard_dir,
+                simtime_ms           = int(t),
+                index                = i,
+            )
 
 
     def run_all(self) -> None:
@@ -114,3 +158,4 @@ class PipelineRunner:
         self.run_analysis()
         self.run_outlier_detection()
         self.run_heatmaps()
+        self.run_dashboards()
