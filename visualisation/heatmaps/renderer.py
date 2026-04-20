@@ -6,10 +6,9 @@ from pathlib import Path
 
 import numpy as np
 import matplotlib.pyplot as plt
-from mpl_toolkits.axes_grid1 import make_axes_locatable
 from tqdm import tqdm
 
-from visualisation.heatmaps.inverse_distance_weighting import interpolate_grid
+from visualisation.heatmaps.inverse_distance_weighting import IDWInterpolator
 from .denmark import DenmarkGrid, build_land_mask, load_denmark_boundary
 from .heatmaps_loader import HeatmapDataset, SnapshotFrame
 
@@ -41,15 +40,12 @@ METRIC_CONFIG: dict[str, dict] = {
     },
 }
 
-_WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
-
 _METRIC_DISPLAY_NAMES: dict[str, str] = {
     "queue_size": "Queue Size",
     "utilization": "Utilization",
     "cancellation_rate": "Cancellation Rate",
 }
 
-# The dark-mode background color (matches the aesthetics of modern dashboards)
 BG = "#0b0f14"
 
 
@@ -80,8 +76,17 @@ def render_all(
     land_mask = build_land_mask(grid) if use_land_mask else None
     dk_boundary = load_denmark_boundary()
 
-    # Bounding box
     extent = [grid.lon_min, grid.lon_max, grid.lat_min, grid.lat_max]
+
+    # Figure geometry computed once.
+    lat_range = grid.lat_max - grid.lat_min
+    lon_range = grid.lon_max - grid.lon_min
+    lat_correction = np.cos(np.radians(56.0))
+    fig_w = 8.0
+    fig_h = fig_w * (lat_range / lon_range) / lat_correction
+
+    # Preallocate the zero raster used when a snapshot has no data.
+    zero_raster = np.zeros_like(grid.lat_grid)
 
     for metric_name, col_name in METRICS:
         metric_dir = output_dir / metric_name
@@ -89,11 +94,17 @@ def render_all(
 
         config = METRIC_CONFIG[metric_name]
 
+        interpolator: IDWInterpolator | None = None
+
         # Use tqdm to show a progress bar in the terminal while rendering
         for i, snap in enumerate(
             tqdm(dataset.snapshots, desc=f"Rendering {metric_name}")
         ):
             out_path = metric_dir / f"{metric_name}_{i}.png"
+
+            # Skip frames that have already been rendered.
+            if out_path.exists():
+                continue
 
             try:
                 lats, lons, values = snap.metric_arrays(col_name)
@@ -102,22 +113,19 @@ def render_all(
                 has_data = False
 
             if has_data:
-                raster = interpolate_grid(
-                    lats, lons, values,
-                    grid.lat_grid,
-                    grid.lon_grid,
-                )
+                if interpolator is None:
+                    interpolator = IDWInterpolator(
+                        lats, lons,
+                        grid.lat_grid, grid.lon_grid,
+                    )
+
+                raster = interpolator.interpolate(values)
+
                 if land_mask is not None:
                     raster[~land_mask] = np.nan
                 raster = np.nan_to_num(raster, nan=0.0)
             else:
-                raster = np.zeros_like(grid.lat_grid)
-
-            lat_range = grid.lat_max - grid.lat_min
-            lon_range = grid.lon_max - grid.lon_min
-            lat_correction = np.cos(np.radians(56.0))
-            fig_w = 8.0
-            fig_h = fig_w * (lat_range / lon_range) / lat_correction
+                raster = zero_raster.copy()
 
             fig, axes = plt.subplots(figsize=(fig_w, fig_h), facecolor=BG)
             axes.set_facecolor(BG)

@@ -126,28 +126,38 @@ class PipelineRunner:
 
         self.file_exists(p.station_snapshots, "Station snapshots")
 
-        snap_df    = pl.read_parquet(p.station_snapshots)
-        arrival_df = pl.read_parquet(p.arrival_snapshots) if p.arrival_snapshots.exists() else pl.DataFrame()
-        outlier_df = pl.read_parquet(p.station_outliers)  if p.station_outliers.exists()  else pl.DataFrame()
+        station_snapshot_df = pl.read_parquet(p.station_snapshots)
+        arrival_snapshot_df = pl.read_parquet(p.arrival_snapshots) if p.arrival_snapshots.exists() else pl.DataFrame()
+        outlier_analysis_df = pl.read_parquet(p.station_outliers)  if p.station_outliers.exists()  else pl.DataFrame()
 
-        missed_pct = None
-        if not arrival_df.is_empty() and "missed_deadline" in arrival_df.columns:
-            missed_pct = arrival_df["missed_deadline"].mean() * 100
+        missed_deadline_pct: float | None = None
+        total_arrivals: int | None = None
+        if not arrival_snapshot_df.is_empty() and "missed_deadline" in arrival_snapshot_df.columns:
+            missed_deadline_pct = arrival_snapshot_df["missed_deadline"].mean() * 100
+            total_arrivals      = len(arrival_snapshot_df)
 
-        times = snap_df["simtime_ms"].unique().sort()
+        station_by_time: dict[int, pl.DataFrame] = {
+            int(simtime_ms): df
+            for simtime_ms, df in station_snapshot_df.group_by("simtime_ms")
+        }
+
+        times = station_snapshot_df["simtime_ms"].unique().sort()
         print(f"Generating {len(times)} dashboards...")
 
-        for i, t in enumerate(times, start=1):
+        for index, timestamp in enumerate(times, start=1):
+            simtime_ms = int(timestamp)
             render_dashboard(
-                run_id               = self.run_id,
-                station_snapshot_df  = snap_df,
-                arrival_snapshot_df  = arrival_df,
-                outlier_analysis_df  = outlier_df,
-                missed_deadlines_percent = missed_pct,
-                heatmap_directory    = p.heatmap_dir,
-                out_dir              = p.dashboard_dir,
-                simtime_ms           = int(t),
-                index                = i,
+                run_id = self.run_id,
+                current_station_df = station_by_time[simtime_ms],
+                station_snapshot_df = station_snapshot_df,
+                arrival_snapshot_df = arrival_snapshot_df,
+                outlier_analysis_df = outlier_analysis_df,
+                missed_deadlines_percent = missed_deadline_pct,
+                total_arrivals = total_arrivals,
+                heatmap_directory = p.heatmap_dir,
+                out_dir = p.dashboard_dir,
+                simtime_ms = simtime_ms,
+                index = index,
             )
 
 
