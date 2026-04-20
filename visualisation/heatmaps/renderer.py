@@ -53,14 +53,12 @@ _METRIC_DISPLAY_NAMES: dict[str, str] = {
 
 BG = "#0b0f14"
 
-
 """
 Each worker process calls _init_worker() once at startup. That function
 builds the expensive shared objects (grid, land mask, boundary, figure
 geometry) and stores them in module-level globals. Subsequent calls to
 _render_frame() in that same process reuse them without rebuilding.
 """
-
 _worker_grid = None
 _worker_land_mask = None
 _worker_boundary = None
@@ -95,16 +93,15 @@ def _init_worker(resolution_km: float, use_land_mask: bool) -> None:
 
 @dataclass
 class _FrameTask:
-    """Everything a worker needs to render one heatmap frame."""
     metric_name: str
-    col_name:    str
-    snapshot:    SnapshotFrame
+    col_name: str
+    snapshot: SnapshotFrame
     frame_index: int
-    out_path:    Path
-    dpi:         int
+    out_path: Path
+    dpi: int
 
 
-def _render_frame(task: _FrameTask) -> None:
+def render_frame(task: _FrameTask) -> None:
     """
     Renders and saves a single heatmap frame. Runs inside a worker process.
     Grid, land mask, and boundary come from worker-local globals set by
@@ -115,12 +112,12 @@ def _render_frame(task: _FrameTask) -> None:
     if task.out_path.exists():
         return
 
-    grid        = _worker_grid
-    land_mask   = _worker_land_mask
-    dk_boundary    = _worker_boundary
-    extent      = _worker_extent
+    grid = _worker_grid
+    land_mask = _worker_land_mask
+    dk_boundary = _worker_boundary
+    extent = _worker_extent
     zero_raster = _worker_zero_raster
-    config      = METRIC_CONFIG[task.metric_name]
+    config = METRIC_CONFIG[task.metric_name]
 
     try:
         lats, lons, values = task.snapshot.metric_arrays(task.col_name)
@@ -203,11 +200,8 @@ def render_all(
     Renders all heatmap frames in parallel using a multiprocessing pool.
 
     Each worker process initialises the grid, land mask, boundary, and figure
-    geometry once via _init_worker, then handles many frames without rebuilding
+    geometry once via _init_worker, then handles each heatmap without rebuilding
     any of that shared state. The IDWInterpolator is also cached per-worker.
-
-    Frames that already exist on disk are skipped. Pool size defaults to None,
-    which lets Python use all available CPU cores automatically.
     """
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -236,7 +230,7 @@ def render_all(
     ) as pool:
 
         for _ in tqdm(
-            pool.imap_unordered(_render_frame, tasks),
+            pool.imap_unordered(render_frame, tasks),
             total=total,
             desc="Heatmaps",
         ):

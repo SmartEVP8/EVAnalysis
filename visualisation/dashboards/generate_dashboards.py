@@ -187,8 +187,7 @@ def render_dashboard(
     plt.close(figure)
 
 """
-Each worker loads the shared DataFrames once into
-process-local globals, and each task only receives the tiny per-frame
+Each worker loads the shared DataFrames once, and each task only receives the per-frame
 arguments (simtime_ms, index, a few scalars and paths).
 """
 _worker_run_id = None
@@ -211,7 +210,7 @@ def init_dashboard_worker(
     heatmap_dir: Path,
     out_dir: Path,
 ) -> None:
-    """Runs once per worker process - stores shared data in process-local globals."""
+    """Runs once per worker process"""
     global _worker_run_id, _worker_station_snapshot_df, _worker_arrival_snapshot_df
     global _worker_outlier_analysis_df, _worker_missed_deadlines_pct
     global _worker_total_arrivals, _worker_heatmap_dir, _worker_out_dir
@@ -228,8 +227,8 @@ def init_dashboard_worker(
 
 @dataclass
 class DashboardTask:
-    simtime_ms:        int
-    index:             int
+    simtime_ms: int
+    index: int
     current_station_df: pl.DataFrame
 
 
@@ -267,7 +266,7 @@ def generate_dashboards(
 
     Computes KPIs and pre-groups snapshots by timestamp in the main
     process, then distributes per-frame rendering tasks across a worker pool.
-    The large shared DataFrames are sent to each worker once via the pool
+    The shared DataFrames are sent to each worker once via the pool
     initialiser rather than being serialized with every task.
 
     Pool size defaults to None, which lets Python use all available CPU cores.
