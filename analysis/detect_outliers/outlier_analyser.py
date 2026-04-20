@@ -78,12 +78,12 @@ def detect_outliers(
     return pl.concat(all_flags)
 
 
-def process_outliers(run_id: str) -> None:
+def process_outliers(run_id: str, output_root: Path = OUTPUT_ROOT) -> None:
     """
     Loads snapshot files for a simulation run, detects outliers, and writes
     the results to Parquet.
     """
-    run_root = OUTPUT_ROOT / run_id
+    run_root = output_root / run_id
     analysis_dir = run_root / "analysis"
     outliers_dir = run_root / "outliers"
     outliers_dir.mkdir(exist_ok=True)

@@ -1,17 +1,3 @@
-"""
-Runs a weight search over SmartEV cost weights.
-
-Two search strategies are available (swap by commenting/uncommenting in main):
-  - Random search: samples weights uniformly at random for a fixed number of iterations.
-  - Grid search:   exhaustively tries every combination of evenly-spaced values per weight.
-
-For each trial this script:
-1) picks a set of cost weights (via the active strategy),
-2) runs the SmartEV headless simulation with those weights,
-3) runs the existing EVAnalysis pipeline on the generated run,
-4) appends the result to a CSV log.
-"""
-
 from __future__ import annotations
 
 import argparse
@@ -23,6 +9,7 @@ import subprocess
 import time
 import tomllib
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -72,7 +59,6 @@ class WeightRanges:
     urgency: tuple[float, float]
     expected_wait_time: tuple[float, float]
 
-# CLI
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Weight search over SmartEV cost weights.")
 
@@ -96,17 +82,6 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Optional CSV path. If omitted, defaults to random/grid results file based on --strategy.",
     )
-    parser.add_argument(
-        "--skip-analysis",
-        action="store_true",
-        help="Run simulation only, skip EVAnalysis pipeline.",
-    )
-    parser.add_argument(
-        "--max-run-attempts",
-        type=int,
-        default=3,
-        help="Max attempts for generating valid parquet outputs per iteration.",
-    )
     parser.add_argument("--price-sensitivity-range", type=float, nargs=2, default=(0.0, 1.0))
     parser.add_argument("--path-deviation-range", type=float, nargs=2, default=(0.0, 1.0))
     parser.add_argument("--effective-queue-size-range", type=float, nargs=2, default=(0.0, 1.0))
@@ -123,7 +98,6 @@ def parse_args() -> argparse.Namespace:
         help="Search strategy to use (default: random).",
     )
 
-    # Grid search
     parser.add_argument(
         "--points-per-axis",
         type=int,
@@ -135,7 +109,6 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-# Config / setup
 def load_perkuet_root() -> Path:
     config_path = PROJECT_ROOT / "config.toml"
     with open(config_path, "rb") as fh:
@@ -152,7 +125,6 @@ def load_perkuet_root() -> Path:
 
 
 def resolve_path(path: Path, *, must_be: str = "file") -> Path:
-    """Return an absolute path, raising if the target doesn't exist."""
     if not path.is_absolute():
         path = (PROJECT_ROOT / path).resolve()
 
@@ -181,8 +153,6 @@ def build_ranges(args: argparse.Namespace) -> WeightRanges:
     )
 
 
-
-# Sampling
 def sample_weights(rng: random.Random, ranges: WeightRanges) -> dict[str, float]:
     return {
         "price_sensitivity": rng.uniform(*ranges.price_sensitivity),
@@ -192,19 +162,12 @@ def sample_weights(rng: random.Random, ranges: WeightRanges) -> dict[str, float]
         "expected_wait_time": rng.uniform(*ranges.expected_wait_time),
     }
 
-# Sampling — Random search
 def random_search_weights(args: argparse.Namespace, ranges: WeightRanges) -> list[dict[str, float]]:
-    """Return a list of randomly sampled weight dicts (length = args.iterations)."""
     rng = random.Random()
     return [sample_weights(rng, ranges) for _ in range(args.iterations)]
 
 
 def build_grid(points_per_axis: int) -> list[dict[str, float]]:
-    """Return every combination of evenly-spaced values across all weight axes.
-
-    With points_per_axis=5 each axis gets [0.0, 0.25, 0.5, 0.75, 1.0],
-    giving 5**5 = 3,125 total trials.
-    """
     if points_per_axis < 2:
         raise ValueError("--points-per-axis must be >= 2")
 
@@ -217,7 +180,13 @@ def build_grid(points_per_axis: int) -> list[dict[str, float]]:
     ]
 
 
-# Simulation
+def create_search_session_dir(strategy: str) -> Path:
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    session_dir = PROJECT_ROOT / "runs" / "search_sessions" / f"{strategy}_{timestamp}"
+    session_dir.mkdir(parents=True, exist_ok=False)
+    return session_dir
+
+
 def list_run_dirs(perkuet_root: Path) -> set[str]:
     return {path.name for path in perkuet_root.iterdir() if path.is_dir()}
 
@@ -229,7 +198,6 @@ def run_headless_once(
     weights: dict[str, float],
     perkuet_root: Path,
 ) -> Path:
-    """Launch a single headless simulation and return the new run directory."""
     existing_run_names = list_run_dirs(perkuet_root)
     started_at = time.time()
 
@@ -245,12 +213,10 @@ def run_headless_once(
 
     all_run_dirs = [path for path in perkuet_root.iterdir() if path.is_dir()]
 
-    # Prefer a directory that didn't exist before the run.
     new_dirs = [path for path in all_run_dirs if path.name not in existing_run_names]
     if new_dirs:
         return max(new_dirs, key=lambda p: p.stat().st_mtime)
 
-    # Fall back to any directory whose mtime overlaps with our run window.
     recent_dirs = [path for path in all_run_dirs if path.stat().st_mtime >= started_at - 1]
     if recent_dirs:
         return max(recent_dirs, key=lambda p: p.stat().st_mtime)
@@ -262,57 +228,34 @@ def metric_paths(run_dir: Path) -> list[Path]:
     return [run_dir / name for name in METRIC_FILENAMES]
 
 
-def wait_for_metrics_files_ready(
-    run_dir: Path,
-    *,
-    timeout_seconds: float = 30.0,
-    poll_seconds: float = 0.5,
-    stable_reads_required: int = 3,
-) -> None:
-    """Block until all metric files exist, are non-empty, and have stable sizes."""
-    paths = metric_paths(run_dir)
-    deadline = time.time() + timeout_seconds
-    last_sizes: dict[Path, int] = {}
-    stable_reads = 0
-
-    while time.time() < deadline:
-        if not all(path.exists() for path in paths):
-            last_sizes = {}
-            stable_reads = 0
-            time.sleep(poll_seconds)
-            continue
-
-        current_sizes = {path: path.stat().st_size for path in paths}
-        all_non_empty = all(size > 0 for size in current_sizes.values())
-        sizes_unchanged = current_sizes == last_sizes
-
-        if all_non_empty and sizes_unchanged:
-            stable_reads += 1
-            if stable_reads >= stable_reads_required:
-                return
-        else:
-            stable_reads = 0
-
-        last_sizes = current_sizes
-        time.sleep(poll_seconds)
-
-    missing = [path.name for path in paths if not path.exists()]
-    raise TimeoutError(
-        f"Metric files not ready within {timeout_seconds}s. "
-        f"Missing: {missing or 'none'}, run={run_dir}"
-    )
-
-
+# Verifies that metric files exist, are non-empty, and contain valid Parquet data.
 def validate_metrics_parquet(run_dir: Path) -> None:
-    for path in metric_paths(run_dir):
-        if not path.exists():
-            raise FileNotFoundError(f"Missing metrics file: {path}")
-        if path.stat().st_size == 0:
-            raise ValueError(f"Empty metrics file: {path}")
-        pl.read_parquet(path, n_rows=1)  # catches malformed parquet quickly
+    paths = metric_paths(run_dir)
+    missing = []
+    empty = []
 
-def run_analysis(run_dir: Path) -> None:
-    PipelineRunner(run_dir).run_all()
+    for path in paths:
+        if not path.exists():
+            missing.append(path.name)
+        elif path.stat().st_size == 0:
+            empty.append(path.name)
+
+    if missing or empty:
+        error_msg = f"Simulation failed to output valid metrics. run={run_dir}"
+        if missing:
+            error_msg += f"\n  Missing: {', '.join(missing)}"
+        if empty:
+            error_msg += f"\n  Empty: {', '.join(empty)}"
+        raise RuntimeError(error_msg)
+
+    for path in paths:
+        try:
+            pl.read_parquet(path, n_rows=1)
+        except Exception as e:
+            raise RuntimeError(f"Corrupt Parquet file '{path.name}': {e}")
+
+def run_analysis(run_dir: Path, output_root: Path) -> None:
+    PipelineRunner(run_dir, output_root=output_root).run_all()
 
 def append_result_row(csv_path: Path, row: dict[str, Any]) -> None:
     csv_path.parent.mkdir(parents=True, exist_ok=True)
@@ -355,43 +298,25 @@ def run_trial(
     headless_project: Path,
     build_config: str,
     perkuet_root: Path,
-    max_run_attempts: int,
-    skip_analysis: bool,
+    output_root: Path,
 ) -> dict[str, Any]:
-    """Run one simulation + analysis trial, returning a result row dict."""
-    run_dir: Path | None = None
-
     sim_start = time.perf_counter()
-    for attempt in range(1, max_run_attempts + 1):
-        run_dir = run_headless_once(
-            headless_project=headless_project,
-            build_config=build_config,
-            weights=weights,
-            perkuet_root=perkuet_root,
-        )
-        wait_for_metrics_files_ready(run_dir)
-
-        try:
-            validate_metrics_parquet(run_dir)
-            break
-        except Exception as exc:
-            print(f"  Invalid metrics (attempt {attempt}/{max_run_attempts}): {exc}")
-            run_dir = None
-
-    if run_dir is None:
-        raise RuntimeError(
-            f"Failed to produce valid metrics parquet after {max_run_attempts} attempt(s)."
-        )
+    
+    run_dir = run_headless_once(
+        headless_project=headless_project,
+        build_config=build_config,
+        weights=weights,
+        perkuet_root=perkuet_root,
+    )
+    validate_metrics_parquet(run_dir)
 
     simulation_seconds = time.perf_counter() - sim_start
     print(f"  Run: {run_dir.name} ({simulation_seconds:.2f}s)")
 
-    analysis_seconds = 0.0
-    if not skip_analysis:
-        analysis_start = time.perf_counter()
-        run_analysis(run_dir)
-        analysis_seconds = time.perf_counter() - analysis_start
-        print(f"  Analysis complete ({analysis_seconds:.2f}s)")
+    analysis_start = time.perf_counter()
+    run_analysis(run_dir, output_root)
+    analysis_seconds = time.perf_counter() - analysis_start
+    print(f"  Analysis complete ({analysis_seconds:.2f}s)")
 
     return build_result_row(
         iteration=iteration,
@@ -406,15 +331,16 @@ def main() -> None:
     args = parse_args()
 
     if args.iterations <= 0:
-        raise ValueError("--iterations must be > 0")  # only used by random search
-    if args.max_run_attempts <= 0:
-        raise ValueError("--max-run-attempts must be > 0")
+        raise ValueError("--iterations must be > 0")
 
     headless_project = resolve_path(args.headless_project, must_be="file")
+    session_dir = create_search_session_dir(args.strategy)
+
     if args.results_file is None:
-        results_path = DEFAULT_GRID_RESULTS_PATH if args.strategy == "grid" else DEFAULT_RANDOM_RESULTS_PATH
+        results_path = session_dir / f"{args.strategy}_search_results.csv"
     else:
         results_path = args.results_file if args.results_file.is_absolute() else (PROJECT_ROOT / args.results_file).resolve()
+    output_root = session_dir
     perkuet_root = load_perkuet_root()
     ranges = build_ranges(args)
 
@@ -427,6 +353,7 @@ def main() -> None:
     print(f"Running {total} trials")
     print(f"Headless project : {headless_project}")
     print(f"Perkuet root     : {perkuet_root}")
+    print(f"Session dir      : {session_dir}")
     print(f"Results CSV      : {results_path}")
 
     try:
@@ -441,8 +368,7 @@ def main() -> None:
                     headless_project=headless_project,
                     build_config=args.build_config,
                     perkuet_root=perkuet_root,
-                    max_run_attempts=args.max_run_attempts,
-                    skip_analysis=args.skip_analysis,
+                    output_root=output_root,
                 )
             except Exception as exc:
                 print(f"  Iteration failed: {exc}")

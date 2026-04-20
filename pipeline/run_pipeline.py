@@ -41,9 +41,9 @@ class RunPaths:
     dashboard_dir: Path
 
     @classmethod
-    def from_run_dir(run_paths: RunPaths, run_dir: Path) -> "RunPaths":
-        analysis_dir = Path("runs") / run_dir.name / "analysis"
-        outlier_dir  = Path("runs") / run_dir.name / "outliers"
+    def from_run_dir(run_paths: RunPaths, run_dir: Path, output_root: Path = Path("runs")) -> "RunPaths":
+        analysis_dir = output_root / run_dir.name / "analysis"
+        outlier_dir  = output_root / run_dir.name / "outliers"
         return run_paths(
             run_dir=run_dir,
             station_metrics=run_dir / "StationSnapshotMetric.parquet",
@@ -55,8 +55,8 @@ class RunPaths:
             stations_locations=Path("data/stations_locations.parquet"),
             outlier_dir=outlier_dir,
             station_outliers=outlier_dir / "station_outliers.parquet",
-            heatmap_dir=Path("runs") / run_dir.name / "heatmaps",
-            dashboard_dir=Path("runs") / run_dir.name / "dashboards",
+            heatmap_dir=output_root / run_dir.name / "heatmaps",
+            dashboard_dir=output_root / run_dir.name / "dashboards",
         )
 
 
@@ -65,14 +65,15 @@ class PipelineRunner:
     Orchestrates the data processing and visualisation pipeline for a simulation run.
     """
 
-    def __init__(self, run_dir: Path):
+    def __init__(self, run_dir: Path, output_root: Path = Path("runs")):
         """
         Args:
             run_dir: Directory containing the raw simulation outputs
                      (Perkuet/{run_id} inside the SmartEV repo).
         """
         self.run_id = run_dir.name
-        self.paths = RunPaths.from_run_dir(run_dir)
+        self.output_root = output_root
+        self.paths = RunPaths.from_run_dir(run_dir, output_root)
 
 
     def file_exists(self, path: Path, description: str) -> bool:
@@ -86,18 +87,18 @@ class PipelineRunner:
         p = self.paths
 
         if self.file_exists(p.station_metrics, "Station metrics"):
-            analyse_station(p.station_metrics, self.run_id)
+            analyse_station(p.station_metrics, self.run_id, self.output_root)
 
         if self.file_exists(p.charger_metrics, "Charger metrics"):
-            analyse_charger(p.charger_metrics, self.run_id)
+            analyse_charger(p.charger_metrics, self.run_id, self.output_root)
 
         if self.file_exists(p.arrival_metrics, "Arrival metrics"):
-            analyse_arrival(p.arrival_metrics, self.run_id)
+            analyse_arrival(p.arrival_metrics, self.run_id, self.output_root)
 
 
     def run_outlier_detection(self) -> None:
         """Flags statistical outliers in the processed snapshot data."""
-        process_outliers(self.run_id)
+        process_outliers(self.run_id, self.output_root)
 
 
     def run_heatmaps(self) -> None:
