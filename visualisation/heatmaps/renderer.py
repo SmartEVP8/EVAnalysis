@@ -113,7 +113,7 @@ def render_all(
                 has_data = False
 
             if has_data:
-                if interpolator is None:
+                if interpolator is None or interpolator._n_stations != len(lats):
                     interpolator = IDWInterpolator(
                         lats, lons,
                         grid.lat_grid, grid.lon_grid,

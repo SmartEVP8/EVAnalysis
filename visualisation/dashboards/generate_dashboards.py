@@ -105,7 +105,7 @@ def draw_heatmap_panel(axes: plt.Axes, image_array, title: str) -> None:
 
 def render_dashboard(
     run_id: str,
-    current_station_df: pl.DataFrame, # Pre-sliced to the current simtime_ms from render_dashboards
+    current_station_df: pl.DataFrame,
     station_snapshot_df: pl.DataFrame,
     arrival_snapshot_df: pl.DataFrame,
     outlier_analysis_df: pl.DataFrame,
@@ -186,25 +186,21 @@ def render_dashboard(
     print(f"Saved → {out_path}")
 
 
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--run-dir", required=True)
-    args = parser.parse_args()
+def generate_dashboards(
+    run_id: str,
+    station_snapshot_df: pl.DataFrame,
+    arrival_snapshot_df: pl.DataFrame,
+    outlier_analysis_df: pl.DataFrame,
+    heatmap_dir: Path,
+    out_dir: Path,
+) -> None:
+    """
+    Orchestrates dashboard generation for a full simulation run.
 
-    run_dir = Path(args.run_dir)
-    run_id  = run_dir.name
-
-    station_path = run_dir / "analysis" / "station_snapshots.parquet"
-    arrival_path = run_dir / "analysis" / "arrival_snapshots.parquet"
-    outlier_path = run_dir / "outliers"  / "station_outliers.parquet"
-
-    if not station_path.exists():
-        raise FileNotFoundError(station_path)
-
-    station_snapshot_df = pl.read_parquet(station_path)
-    arrival_snapshot_df = pl.read_parquet(arrival_path) if arrival_path.exists() else pl.DataFrame()
-    outlier_analysis_df = pl.read_parquet(outlier_path) if outlier_path.exists() else pl.DataFrame()
-
+    Computes KPIs, pre-groups snapshots by timestamp, and calls
+    render_dashboard for each frame. Both run_pipeline and main() delegate
+    here so the logic only lives in one place.
+    """
     missed_deadline_pct: float | None = None
     total_arrivals: int | None = None
     if not arrival_snapshot_df.is_empty() and "missed_deadline" in arrival_snapshot_df.columns:
@@ -212,12 +208,9 @@ def main():
         total_arrivals = len(arrival_snapshot_df)
 
     station_by_time: dict[int, pl.DataFrame] = {
-        int(simtime_ms): df
-        for simtime_ms, df in station_snapshot_df.group_by("simtime_ms")
+        int(simtime_ms[0]): dataframe
+        for simtime_ms, dataframe in station_snapshot_df.group_by("simtime_ms")
     }
-
-    heatmap_dir = run_dir / "heatmaps"
-    out_dir     = run_dir / "dashboards"
 
     times = station_snapshot_df["simtime_ms"].unique().sort()
     print(f"Generating {len(times)} dashboards...")
@@ -237,6 +230,30 @@ def main():
             simtime_ms = simtime_ms,
             index = index,
         )
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--run-dir", required=True)
+    args = parser.parse_args()
+
+    run_dir = Path(args.run_dir)
+
+    station_path = run_dir / "analysis" / "station_snapshots.parquet"
+    arrival_path = run_dir / "analysis" / "arrival_snapshots.parquet"
+    outlier_path = run_dir / "outliers"  / "station_outliers.parquet"
+
+    if not station_path.exists():
+        raise FileNotFoundError(station_path)
+
+    generate_dashboards(
+        run_id              = run_dir.name,
+        station_snapshot_df = pl.read_parquet(station_path),
+        arrival_snapshot_df = pl.read_parquet(arrival_path) if arrival_path.exists() else pl.DataFrame(),
+        outlier_analysis_df = pl.read_parquet(outlier_path) if outlier_path.exists() else pl.DataFrame(),
+        heatmap_dir         = run_dir / "heatmaps",
+        out_dir             = run_dir / "dashboards",
+    )
 
 
 if __name__ == "__main__":

@@ -13,7 +13,7 @@ from analysis.metrics_analyser.arrival_metrics_analyser import analyse_arrival
 from analysis.detect_outliers.outlier_analyser import process_outliers
 from visualisation.heatmaps.heatmaps_loader import load_heatmap_data
 from visualisation.heatmaps.renderer import render_all
-from visualisation.dashboards.generate_dashboards import render_dashboard
+from visualisation.dashboards.generate_dashboards import generate_dashboards
 
 import polars as pl
 
@@ -66,11 +66,6 @@ class PipelineRunner:
     """
 
     def __init__(self, run_dir: Path):
-        """
-        Args:
-            run_dir: Directory containing the raw simulation outputs
-                     (Perkuet/{run_id} inside the SmartEV repo).
-        """
         self.run_id = run_dir.name
         self.paths = RunPaths.from_run_dir(run_dir)
 
@@ -126,39 +121,14 @@ class PipelineRunner:
 
         self.file_exists(p.station_snapshots, "Station snapshots")
 
-        station_snapshot_df = pl.read_parquet(p.station_snapshots)
-        arrival_snapshot_df = pl.read_parquet(p.arrival_snapshots) if p.arrival_snapshots.exists() else pl.DataFrame()
-        outlier_analysis_df = pl.read_parquet(p.station_outliers)  if p.station_outliers.exists()  else pl.DataFrame()
-
-        missed_deadline_pct: float | None = None
-        total_arrivals: int | None = None
-        if not arrival_snapshot_df.is_empty() and "missed_deadline" in arrival_snapshot_df.columns:
-            missed_deadline_pct = arrival_snapshot_df["missed_deadline"].mean() * 100
-            total_arrivals      = len(arrival_snapshot_df)
-
-        station_by_time: dict[int, pl.DataFrame] = {
-            int(simtime_ms): df
-            for simtime_ms, df in station_snapshot_df.group_by("simtime_ms")
-        }
-
-        times = station_snapshot_df["simtime_ms"].unique().sort()
-        print(f"Generating {len(times)} dashboards...")
-
-        for index, timestamp in enumerate(times, start=1):
-            simtime_ms = int(timestamp)
-            render_dashboard(
-                run_id = self.run_id,
-                current_station_df = station_by_time[simtime_ms],
-                station_snapshot_df = station_snapshot_df,
-                arrival_snapshot_df = arrival_snapshot_df,
-                outlier_analysis_df = outlier_analysis_df,
-                missed_deadlines_percent = missed_deadline_pct,
-                total_arrivals = total_arrivals,
-                heatmap_directory = p.heatmap_dir,
-                out_dir = p.dashboard_dir,
-                simtime_ms = simtime_ms,
-                index = index,
-            )
+        generate_dashboards(
+            run_id              = self.run_id,
+            station_snapshot_df = pl.read_parquet(p.station_snapshots),
+            arrival_snapshot_df = pl.read_parquet(p.arrival_snapshots) if p.arrival_snapshots.exists() else pl.DataFrame(),
+            outlier_analysis_df = pl.read_parquet(p.station_outliers)  if p.station_outliers.exists()  else pl.DataFrame(),
+            heatmap_dir         = p.heatmap_dir,
+            out_dir             = p.dashboard_dir,
+        )
 
 
     def run_all(self) -> None:
