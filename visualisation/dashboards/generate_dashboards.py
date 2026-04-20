@@ -228,6 +228,7 @@ def init_dashboard_worker(
 @dataclass
 class DashboardTask:
     simtime_ms: int
+    day: int
     index: int
     current_station_df: pl.DataFrame
 
@@ -278,19 +279,25 @@ def generate_dashboards(
         missed_deadline_pct = arrival_snapshot_df["missed_deadline"].mean() * 100
         total_arrivals = len(arrival_snapshot_df)
 
-    station_by_time: dict[int, pl.DataFrame] = {
-        int(key[0]): dataframe
-        for key, dataframe in station_snapshot_df.group_by("simtime_ms")
+    station_by_day_time: dict[tuple[int, int], pl.DataFrame] = {
+        (int(key[0]), int(key[1])): dataframe
+        for key, dataframe in station_snapshot_df.group_by(["day", "simtime_ms"])
     }
 
-    times = station_snapshot_df["simtime_ms"].unique().sort()
+    times = (
+        station_snapshot_df
+        .select(["day", "simtime_ms"])
+        .unique()
+        .sort(["day", "simtime_ms"])
+    )
     tasks = [
         DashboardTask(
-            simtime_ms = int(timestamp),
-            index = index,
-            current_station_df = station_by_time[int(timestamp)],
+            simtime_ms         = int(row["simtime_ms"]),
+            day                = int(row["day"]),
+            index              = index,
+            current_station_df = station_by_day_time[(int(row["day"]), int(row["simtime_ms"]))],
         )
-        for index, timestamp in enumerate(times, start=1)
+        for index, row in enumerate(times.iter_rows(named=True), start=1)
     ]
 
     total = len(tasks)
