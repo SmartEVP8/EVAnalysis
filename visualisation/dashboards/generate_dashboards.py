@@ -1,8 +1,11 @@
 """
 EVAnalysis – dashboard generator.
 """
+from __future__ import annotations
 
 import argparse
+import multiprocessing as mp
+from dataclasses import dataclass
 from pathlib import Path
 
 import polars as pl
@@ -11,6 +14,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 import matplotlib.image as mpimg
+from tqdm import tqdm
 
 import visualisation.dashboards.charts.arrival_delay_diagram as arrivals_distribution
 import visualisation.dashboards.charts.cancellation_rate_diagram as cancellation_distribution
@@ -52,15 +56,13 @@ def draw_kpi_card(axes: plt.Axes, label: str, value: str, color: str, subtitle: 
     Draws a KPI card.
 
     If `subtitle` is provided it is rendered as a small secondary line below the main value.
-    This is used for the Missed Deadlines percentage card.
+    This is (only) used for the Missed Deadlines percentage card.
     """
     axes.set_facecolor(PANEL_BG)
     for border in axes.spines.values():
         border.set_edgecolor(color)
         border.set_linewidth(1.5)
 
-    # Shift the main value up slightly when a subtitle is present so both lines
-    # fit inside the card without overlapping the label at the top.
     value_y = 0.38 if subtitle is None else 0.44
     label_y = 0.72 if subtitle is None else 0.78
 
@@ -141,7 +143,7 @@ def render_dashboard(
                   horizontalalignment="center", verticalalignment="center",
                   fontsize=28, fontweight="bold", color=TEXT)
 
-    # Row 1 — KPI cards
+    # Row 1
     kpi_grid = gridspec.GridSpecFromSubplotSpec(1, 3, subplot_spec=figure_grid[1], wspace=0.04)
 
     if missed_deadlines_percent is not None:
@@ -171,19 +173,85 @@ def render_dashboard(
     cancellation_distribution.render(  figure.add_subplot(distribution_grid_2[1]), station_snapshot_df, simtime_ms)
     outliers_distribution.render(figure.add_subplot(distribution_grid_2[2]), outlier_analysis_df, simtime_ms)
 
-    # Row 4 — heatmap panels
+    # Row 4
     heatmap_grid = gridspec.GridSpecFromSubplotSpec(1, 3, subplot_spec=figure_grid[4], wspace=0.04)
     heatmap_names  = ["utilization", "queue_size", "cancellation_rate"]
     heatmap_titles = ["UTILIZATION", "QUEUE SIZE", "CANCELLATION"]
-    for i, (name, hm_title) in enumerate(zip(heatmap_names, heatmap_titles)):
-        path = heatmap_directory / name / f"{name}_{index - 1}.png"
-        draw_heatmap_panel(figure.add_subplot(heatmap_grid[i]), load_image_as_array(path), hm_title)
+    for i, (heatmap_name, heatmap_title) in enumerate(zip(heatmap_names, heatmap_titles)):
+        path = heatmap_directory / heatmap_name / f"{heatmap_name}_{index - 1}.png"
+        draw_heatmap_panel(figure.add_subplot(heatmap_grid[i]), load_image_as_array(path), heatmap_title)
 
     out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / f"dashboard_{index}.png"
     figure.savefig(out_path, dpi=150, facecolor=BG)
     plt.close(figure)
-    print(f"Saved → {out_path}")
+
+"""
+Each worker loads the shared DataFrames once into
+process-local globals, and each task only receives the tiny per-frame
+arguments (simtime_ms, index, a few scalars and paths).
+"""
+_worker_run_id = None
+_worker_station_snapshot_df = None
+_worker_arrival_snapshot_df = None
+_worker_outlier_analysis_df = None
+_worker_missed_deadlines_pct = None
+_worker_total_arrivals = None
+_worker_heatmap_dir = None
+_worker_out_dir = None
+
+
+def init_dashboard_worker(
+    run_id: str,
+    station_snapshot_df: pl.DataFrame,
+    arrival_snapshot_df: pl.DataFrame,
+    outlier_analysis_df: pl.DataFrame,
+    missed_deadlines_percent: float | None,
+    total_arrivals: int | None,
+    heatmap_dir: Path,
+    out_dir: Path,
+) -> None:
+    """Runs once per worker process - stores shared data in process-local globals."""
+    global _worker_run_id, _worker_station_snapshot_df, _worker_arrival_snapshot_df
+    global _worker_outlier_analysis_df, _worker_missed_deadlines_pct
+    global _worker_total_arrivals, _worker_heatmap_dir, _worker_out_dir
+
+    _worker_run_id = run_id
+    _worker_station_snapshot_df = station_snapshot_df
+    _worker_arrival_snapshot_df = arrival_snapshot_df
+    _worker_outlier_analysis_df = outlier_analysis_df
+    _worker_missed_deadlines_pct = missed_deadlines_percent
+    _worker_total_arrivals = total_arrivals
+    _worker_heatmap_dir = heatmap_dir
+    _worker_out_dir = out_dir
+
+
+@dataclass
+class DashboardTask:
+    simtime_ms:        int
+    index:             int
+    current_station_df: pl.DataFrame
+
+
+def render_dashboard_task(task: DashboardTask) -> None:
+    """Renders one dashboard frame using worker-local shared state."""
+    out_path = _worker_out_dir / f"dashboard_{task.index}.png"
+    if out_path.exists():
+        return
+
+    render_dashboard(
+        run_id = _worker_run_id,
+        current_station_df = task.current_station_df,
+        station_snapshot_df = _worker_station_snapshot_df,
+        arrival_snapshot_df = _worker_arrival_snapshot_df,
+        outlier_analysis_df = _worker_outlier_analysis_df,
+        missed_deadlines_percent = _worker_missed_deadlines_pct,
+        total_arrivals = _worker_total_arrivals,
+        heatmap_directory = _worker_heatmap_dir,
+        out_dir = _worker_out_dir,
+        simtime_ms = task.simtime_ms,
+        index = task.index,
+    )
 
 
 def generate_dashboards(
@@ -195,11 +263,15 @@ def generate_dashboards(
     out_dir: Path,
 ) -> None:
     """
-    Orchestrates dashboard generation for a full simulation run.
+    Orchestrates parallel dashboard generation for a full simulation run.
 
-    Computes KPIs, pre-groups snapshots by timestamp, and calls
-    render_dashboard for each frame. Both run_pipeline and main() delegate
-    here so the logic only lives in one place.
+    Computes KPIs and pre-groups snapshots by timestamp in the main
+    process, then distributes per-frame rendering tasks across a worker pool.
+    The large shared DataFrames are sent to each worker once via the pool
+    initialiser rather than being serialized with every task.
+
+    Pool size defaults to None, which lets Python use all available CPU cores.
+    Frames that already exist on disk are skipped.
     """
     missed_deadline_pct: float | None = None
     total_arrivals: int | None = None
@@ -208,28 +280,43 @@ def generate_dashboards(
         total_arrivals = len(arrival_snapshot_df)
 
     station_by_time: dict[int, pl.DataFrame] = {
-        int(simtime_ms[0]): dataframe
-        for simtime_ms, dataframe in station_snapshot_df.group_by("simtime_ms")
+        int(key[0]): dataframe
+        for key, dataframe in station_snapshot_df.group_by("simtime_ms")
     }
 
     times = station_snapshot_df["simtime_ms"].unique().sort()
-    print(f"Generating {len(times)} dashboards...")
-
-    for index, timestamp in enumerate(times, start=1):
-        simtime_ms = int(timestamp)
-        render_dashboard(
-            run_id = run_id,
-            current_station_df = station_by_time[simtime_ms],
-            station_snapshot_df = station_snapshot_df,
-            arrival_snapshot_df = arrival_snapshot_df,
-            outlier_analysis_df = outlier_analysis_df,
-            missed_deadlines_percent = missed_deadline_pct,
-            total_arrivals = total_arrivals,
-            heatmap_directory = heatmap_dir,
-            out_dir = out_dir,
-            simtime_ms = simtime_ms,
+    tasks = [
+        DashboardTask(
+            simtime_ms = int(timestamp),
             index = index,
+            current_station_df = station_by_time[int(timestamp)],
         )
+        for index, timestamp in enumerate(times, start=1)
+    ]
+
+    total = len(tasks)
+    print(f"Generating {total} dashboards...")
+
+    with mp.Pool(
+        processes=None,
+        initializer=init_dashboard_worker,
+        initargs=(
+            run_id,
+            station_snapshot_df,
+            arrival_snapshot_df,
+            outlier_analysis_df,
+            missed_deadline_pct,
+            total_arrivals,
+            heatmap_dir,
+            out_dir,
+        ),
+    ) as pool:
+        for _ in tqdm(
+            pool.imap_unordered(render_dashboard_task, tasks),
+            total=total,
+            desc="Dashboards",
+        ):
+            pass
 
 
 def main():

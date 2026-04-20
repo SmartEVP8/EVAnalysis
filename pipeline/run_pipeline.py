@@ -122,12 +122,12 @@ class PipelineRunner:
         self.file_exists(p.station_snapshots, "Station snapshots")
 
         generate_dashboards(
-            run_id              = self.run_id,
+            run_id = self.run_id,
             station_snapshot_df = pl.read_parquet(p.station_snapshots),
             arrival_snapshot_df = pl.read_parquet(p.arrival_snapshots) if p.arrival_snapshots.exists() else pl.DataFrame(),
             outlier_analysis_df = pl.read_parquet(p.station_outliers)  if p.station_outliers.exists()  else pl.DataFrame(),
-            heatmap_dir         = p.heatmap_dir,
-            out_dir             = p.dashboard_dir,
+            heatmap_dir = p.heatmap_dir,
+            out_dir = p.dashboard_dir,
         )
 
 
