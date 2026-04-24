@@ -14,7 +14,7 @@ OUTPUT_ROOT = Path("runs")
 PERCENTILES = [0.25, 0.50, 0.75, 0.90, 0.95]
 
 
-def analyse_station(parquet_path: Path, run_id: str) -> None:
+def analyse_station(parquet_path: Path, run_id: str, output_root: Path = OUTPUT_ROOT) -> None:
     """
     Performs aggregate analysis on station metrics for a specific simulation run.
     
@@ -37,7 +37,7 @@ def analyse_station(parquet_path: Path, run_id: str) -> None:
     
     validate_schema(df, STATION_SCHEMA, "StationSnapshotMetric")
 
-    out_analysis = OUTPUT_ROOT / run_id / "analysis"
+    out_analysis = output_root / run_id / "analysis"
     out_analysis.mkdir(parents=True, exist_ok=True)
 
 
@@ -69,7 +69,7 @@ def analyse_station(parquet_path: Path, run_id: str) -> None:
 
     print(f"  Saved station_snapshots.parquet ({len(snapshot_df)} rows)")
 
-    out_percentiles = OUTPUT_ROOT / run_id / "percentiles" / "station"
+    out_percentiles = output_root / run_id / "percentiles" / "station"
     out_percentiles.mkdir(parents=True, exist_ok=True)
 
     # Aggregate percentiles across all stations to see network-wide trends

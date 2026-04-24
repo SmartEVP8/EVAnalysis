@@ -16,7 +16,7 @@ from init.loader import add_arrival_day_columns_to_parquet
 OUTPUT_ROOT = Path("runs")
 
 
-def analyse_arrival(parquet_path: Path, run_id: str) -> None:
+def analyse_arrival(parquet_path: Path, run_id: str, output_root: Path = OUTPUT_ROOT) -> None:
     """
     Analyses EV arrival deadline compliance and path deviation for a simulation run.
 
@@ -44,7 +44,7 @@ def analyse_arrival(parquet_path: Path, run_id: str) -> None:
         "path_deviation_minutes", "delta_arrival_minutes", "missed_deadline",
     ]).sort(["day", "simtime_ms"])
 
-    out_analysis = OUTPUT_ROOT / run_id / "analysis"
+    out_analysis = output_root / run_id / "analysis"
     out_analysis.mkdir(parents=True, exist_ok=True)
 
     snapshot_df.write_parquet(out_analysis / "arrival_snapshots.parquet")
@@ -73,7 +73,7 @@ def analyse_arrival(parquet_path: Path, run_id: str) -> None:
         .sort(["weekday_name", "simtime_ms"])
     )
 
-    out_percentiles = OUTPUT_ROOT / run_id / "percentiles" / "arrival"
+    out_percentiles = output_root / run_id / "percentiles" / "arrival"
     out_percentiles.mkdir(parents=True, exist_ok=True)
 
     agg_df.write_parquet(out_percentiles / "arrival_percentiles.parquet")
