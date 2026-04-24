@@ -6,6 +6,11 @@ Processes ArrivalAtDestinationMetric snapshot data to compute:
   - The distribution of path deviation (in km) for late and on-time arrivals.
 
 Output is saved as a single Parquet file for downstream dashboard use.
+
+EVs that drove directly to their destination (DriveDirectlyToDestination=true) are
+excluded from missed-deadline and path-deviation statistics, because they never
+interacted with the charging network and their path deviation is meaningless in
+that context.
 """
 
 from pathlib import Path
@@ -24,7 +29,7 @@ def analyse_arrival(parquet_path: Path, run_id: str) -> None:
     aggregates per time slot to produce:
       - missed_deadline_pct : share of EVs that missed their deadline (0–100)
       - path_deviation_minutes*  : percentile distribution of route deviation in minutes
-      - delta_arrival_*      : percentile distribution of arrival time delta in minutes
+      - delta_arrival_* : percentile distribution of arrival time delta in minutes
     """
     print(f"\n[Arrival] Analysing {parquet_path.name}...")
 
@@ -38,10 +43,14 @@ def analyse_arrival(parquet_path: Path, run_id: str) -> None:
         (pl.col("DeltaArrivalTime") / 1000 / 60).alias("delta_arrival_minutes"),
 
         pl.col("MissedDeadline").cast(pl.Boolean).alias("missed_deadline"),
+
+        # Preserve the direct-drive flag so downstream filters can use it.
+        pl.col("DriveDirectlyToDestination").cast(pl.Boolean).alias("drive_directly"),
     ]).select([
         "day", "weekday_name", "simtime_ms", "time_label",
         "ExpectedArrivalTime", "ActualArrivalTime",
         "path_deviation_minutes", "delta_arrival_minutes", "missed_deadline",
+        "drive_directly",
     ]).sort(["day", "simtime_ms"])
 
     out_analysis = OUTPUT_ROOT / run_id / "analysis"
@@ -50,7 +59,9 @@ def analyse_arrival(parquet_path: Path, run_id: str) -> None:
     snapshot_df.write_parquet(out_analysis / "arrival_snapshots.parquet")
     print(f"  Saved arrival_snapshots.parquet ({len(snapshot_df)} rows)")
 
-    # Aggregate per (weekday, time slot)
+    # Aggregate per (weekday, time slot) if the EV did not drive directly to its destination
+    snapshot_df = snapshot_df.filter(pl.col("drive_directly") == False)
+
     percentiles = [0.25, 0.50, 0.75, 0.90, 0.95]
 
     agg_df = (

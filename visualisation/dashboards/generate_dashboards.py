@@ -276,8 +276,14 @@ def generate_dashboards(
     missed_deadline_pct: float | None = None
     total_arrivals: int | None = None
     if not arrival_snapshot_df.is_empty() and "missed_deadline" in arrival_snapshot_df.columns:
-        missed_deadline_pct = arrival_snapshot_df["missed_deadline"].mean() * 100
-        total_arrivals = len(arrival_snapshot_df)
+        filtered_deadline_df = (
+            arrival_snapshot_df.filter(pl.col("drive_directly") == False)
+            if "drive_directly" in arrival_snapshot_df.columns
+            else arrival_snapshot_df
+        )
+        if not filtered_deadline_df.is_empty():
+            missed_deadline_pct = filtered_deadline_df["missed_deadline"].mean() * 100
+            total_arrivals = len(filtered_deadline_df)
 
     station_by_day_time: dict[tuple[int, int], pl.DataFrame] = {
         (int(key[0]), int(key[1])): dataframe
