@@ -66,7 +66,7 @@ class PipelineRunner:
     Orchestrates the data processing and visualisation pipeline for a simulation run.
     """
 
-    def __init__(self, run_dir: Path):
+    def __init__(self, run_dir: Path, output_root: Path = Path("runs")):
         self.run_id = run_dir.name
         self.output_root = output_root
         self.paths = RunPaths.from_run_dir(run_dir, output_root)
