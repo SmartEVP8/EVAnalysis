@@ -14,6 +14,7 @@ from analysis.detect_outliers.outlier_analyser import process_outliers
 from visualisation.heatmaps.heatmaps_loader import load_heatmap_data
 from visualisation.heatmaps.renderer import render_all
 from visualisation.dashboards.generate_dashboards import generate_dashboards
+from visualisation.dashboards.daily_summaries.generate_daily_dashboard import generate_daily_summaries
 
 import polars as pl
 
@@ -122,13 +123,23 @@ class PipelineRunner:
 
         self.file_exists(p.station_snapshots, "Station snapshots")
 
+        interval_dir = p.dashboard_dir / "intervals"
+        daily_dir = p.dashboard_dir / "daily"
+
         generate_dashboards(
             run_id = self.run_id,
             station_snapshot_df = pl.read_parquet(p.station_snapshots),
             arrival_snapshot_df = pl.read_parquet(p.arrival_snapshots) if p.arrival_snapshots.exists() else pl.DataFrame(),
-            outlier_analysis_df = pl.read_parquet(p.station_outliers)  if p.station_outliers.exists()  else pl.DataFrame(),
+            outlier_analysis_df = pl.read_parquet(p.station_outliers) if p.station_outliers.exists() else pl.DataFrame(),
             heatmap_dir = p.heatmap_dir,
-            out_dir = p.dashboard_dir,
+            out_dir = interval_dir,
+        )
+
+        generate_daily_summaries(
+            run_id = self.run_id,
+            station_snapshot_df = pl.read_parquet(p.station_snapshots),
+            arrival_snapshot_df = pl.read_parquet(p.arrival_snapshots) if p.arrival_snapshots.exists() else pl.DataFrame(),
+            out_dir = daily_dir,
         )
 
 
