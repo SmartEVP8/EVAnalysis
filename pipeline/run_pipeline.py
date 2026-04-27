@@ -13,7 +13,7 @@ from analysis.metrics_analyser.arrival_metrics_analyser import analyse_arrival
 from analysis.detect_outliers.outlier_analyser import process_outliers
 from visualisation.heatmaps.heatmaps_loader import load_heatmap_data
 from visualisation.heatmaps.renderer import render_all
-from visualisation.dashboards.generate_dashboards import render_dashboard
+from visualisation.dashboards.generate_dashboards import generate_dashboards
 
 import polars as pl
 
@@ -65,12 +65,7 @@ class PipelineRunner:
     Orchestrates the data processing and visualisation pipeline for a simulation run.
     """
 
-    def __init__(self, run_dir: Path, output_root: Path = Path("runs")):
-        """
-        Args:
-            run_dir: Directory containing the raw simulation outputs
-                     (Perkuet/{run_id} inside the SmartEV repo).
-        """
+    def __init__(self, run_dir: Path):
         self.run_id = run_dir.name
         self.output_root = output_root
         self.paths = RunPaths.from_run_dir(run_dir, output_root)
@@ -127,29 +122,14 @@ class PipelineRunner:
 
         self.file_exists(p.station_snapshots, "Station snapshots")
 
-        snap_df    = pl.read_parquet(p.station_snapshots)
-        arrival_df = pl.read_parquet(p.arrival_snapshots) if p.arrival_snapshots.exists() else pl.DataFrame()
-        outlier_df = pl.read_parquet(p.station_outliers)  if p.station_outliers.exists()  else pl.DataFrame()
-
-        missed_pct = None
-        if not arrival_df.is_empty() and "missed_deadline" in arrival_df.columns:
-            missed_pct = arrival_df["missed_deadline"].mean() * 100
-
-        times = snap_df["simtime_ms"].unique().sort()
-        print(f"Generating {len(times)} dashboards...")
-
-        for i, t in enumerate(times, start=1):
-            render_dashboard(
-                run_id               = self.run_id,
-                station_snapshot_df  = snap_df,
-                arrival_snapshot_df  = arrival_df,
-                outlier_analysis_df  = outlier_df,
-                missed_deadlines_percent = missed_pct,
-                heatmap_directory    = p.heatmap_dir,
-                out_dir              = p.dashboard_dir,
-                simtime_ms           = int(t),
-                index                = i,
-            )
+        generate_dashboards(
+            run_id = self.run_id,
+            station_snapshot_df = pl.read_parquet(p.station_snapshots),
+            arrival_snapshot_df = pl.read_parquet(p.arrival_snapshots) if p.arrival_snapshots.exists() else pl.DataFrame(),
+            outlier_analysis_df = pl.read_parquet(p.station_outliers)  if p.station_outliers.exists()  else pl.DataFrame(),
+            heatmap_dir = p.heatmap_dir,
+            out_dir = p.dashboard_dir,
+        )
 
 
     def run_all(self) -> None:
