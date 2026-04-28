@@ -34,6 +34,7 @@ class RunPaths:
     station_snapshots: Path
     arrival_snapshots: Path
     wait_time_metrics: Path
+
     scoring_dir: Path
 
     stations_locations: Path
@@ -43,6 +44,9 @@ class RunPaths:
 
     heatmap_dir: Path
     dashboard_dir: Path
+
+    station_percentiles: Path
+    arrival_percentiles: Path
 
     @classmethod
     def from_run_dir(run_paths: RunPaths, run_dir: Path, output_root: Path = Path("runs")) -> "RunPaths":
@@ -64,6 +68,8 @@ class RunPaths:
             scoring_dir=scoring_dir,
             heatmap_dir=output_root / run_dir.name / "heatmaps",
             dashboard_dir=output_root / run_dir.name / "dashboards",
+            station_percentiles = output_root / run_dir.name / "percentiles" / "station" / "station_percentiles.parquet",
+            arrival_percentiles = output_root / run_dir.name / "percentiles" / "arrival" / "arrival_percentiles.parquet",
         )
 
 
@@ -157,8 +163,8 @@ class PipelineRunner:
         self.file_exists(p.wait_time_metrics, "Wait time metrics")
         self.file_exists(p.arrival_snapshots, "Arrival snapshots")
 
-        station_percentiles_path = p.analysis_dir / "station_percentiles.parquet"
-        arrival_percentiles_path = p.analysis_dir / "arrival_percentiles.parquet"
+        station_percentiles_path = p.station_percentiles
+        arrival_percentiles_path = p.arrival_percentiles
 
         self.file_exists(station_percentiles_path, "Station percentiles")
         self.file_exists(arrival_percentiles_path, "Arrival percentiles")
