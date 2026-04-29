@@ -12,6 +12,7 @@ from analysis.metrics_analyser.charger_metrics_analyser import analyse_charger
 from analysis.metrics_analyser.arrival_metrics_analyser import analyse_arrival
 from analysis.detect_outliers.outlier_analyser import process_outliers
 from analysis.scoring.save_scores import run_scoring
+from analysis.scoring.save_scores import run_scoring
 from visualisation.heatmaps.heatmaps_loader import load_heatmap_data
 from visualisation.heatmaps.renderer import render_all
 from visualisation.dashboards.generate_dashboards import generate_dashboards
@@ -45,6 +46,7 @@ class RunPaths:
     heatmap_dir: Path
     dashboard_dir: Path
 
+    scoring_dir: Path
     station_percentiles: Path
     arrival_percentiles: Path
 
@@ -52,8 +54,8 @@ class RunPaths:
     def from_run_dir(run_paths: RunPaths, run_dir: Path, output_root: Path = Path("runs")) -> "RunPaths":
         analysis_dir = output_root / run_dir.name / "analysis"
         outlier_dir  = output_root / run_dir.name / "outliers"
-        scoring_dir = output_root / run_dir.name / "scoring"
-        return run_paths(
+        scoring_dir  = output_root / run_dir.name / "scoring"
+        return RunPaths(
             run_dir=run_dir,
             station_metrics=run_dir / "StationSnapshotMetric.parquet",
             charger_metrics=run_dir / "ChargerSnapshotMetric.parquet",
@@ -66,10 +68,11 @@ class RunPaths:
             outlier_dir=outlier_dir,
             station_outliers=outlier_dir / "station_outliers.parquet",
             scoring_dir=scoring_dir,
+            scoring_dir=scoring_dir,
             heatmap_dir=output_root / run_dir.name / "heatmaps",
             dashboard_dir=output_root / run_dir.name / "dashboards",
-            station_percentiles = output_root / run_dir.name / "percentiles" / "station" / "station_percentiles.parquet",
-            arrival_percentiles = output_root / run_dir.name / "percentiles" / "arrival" / "arrival_percentiles.parquet",
+            station_percentiles=output_root / run_dir.name / "percentiles" / "station" / "station_percentiles.parquet",
+            arrival_percentiles=output_root / run_dir.name / "percentiles" / "arrival" / "arrival_percentiles.parquet",
         )
 
 
@@ -154,30 +157,18 @@ class PipelineRunner:
             out_dir = daily_dir,
         )
 
-    
+
     def run_scoring(self) -> None:
-        """Computes and saves penalty scores for this simulation run."""
         p = self.paths
-
-        self.file_exists(p.station_snapshots, "Station snapshots")
-        self.file_exists(p.wait_time_metrics, "Wait time metrics")
-        self.file_exists(p.arrival_snapshots, "Arrival snapshots")
-
-        station_percentiles_path = p.station_percentiles
-        arrival_percentiles_path = p.arrival_percentiles
-
-        self.file_exists(station_percentiles_path, "Station percentiles")
-        self.file_exists(arrival_percentiles_path, "Arrival percentiles")
+        self.file_exists(p.station_percentiles, "Station percentiles")
+        self.file_exists(p.arrival_percentiles, "Arrival percentiles")
 
         run_scoring(
-            run_id=self.run_id,
-            station_snapshots=pl.read_parquet(p.station_snapshots),
-            station_percentiles=pl.read_parquet(station_percentiles_path),
-            wait_time_metrics=pl.read_parquet(p.wait_time_metrics),
-            arrival_snapshots=pl.read_parquet(p.arrival_snapshots),
-            arrival_percentiles=pl.read_parquet(arrival_percentiles_path),
-            simulation_config={"source": str(p.run_dir)},
-            output_root=self.output_root,
+            run_id = self.run_id,
+            station_snapshots = pl.read_parquet(p.station_percentiles),
+            ev_percentiles = pl.read_parquet(p.arrival_percentiles),
+            simulation_config = {"source": str(p.run_dir)},
+            output_root = self.output_root,
         )
 
 
@@ -189,4 +180,5 @@ class PipelineRunner:
         self.run_outlier_detection()
         self.run_heatmaps()
         self.run_dashboards()
+        self.run_scoring()
         self.run_scoring()

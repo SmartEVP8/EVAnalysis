@@ -112,11 +112,11 @@ def add_arrival_day_columns_to_parquet(parquet_path: Path) -> pl.DataFrame:
     df = pl.read_parquet(parquet_path)
 
     df = df.with_columns([
-        ((pl.col("ActualArrivalTime") * 1000) // MS_PER_DAY)
+        ((pl.col("ActualArrivalTime")) // MS_PER_DAY)
         .cast(pl.Int32)
         .alias("day"),
 
-        ((pl.col("ActualArrivalTime") * 1000) % MS_PER_DAY)
+        ((pl.col("ActualArrivalTime")) % MS_PER_DAY)
         .cast(pl.Int64)
         .alias("simtime_ms"),
     ])

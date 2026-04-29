@@ -12,6 +12,7 @@ import polars as pl
 
 from analysis.scoring.station_scorer import score_stations
 from analysis.scoring.ev_scorer import score_evs
+from visualisation.dashboards.scoring_dashboard import generate_dashboard
 
 
 def run_scoring(
@@ -29,18 +30,10 @@ def run_scoring(
     ev_scores = score_evs(ev_percentiles, time_aggregation)
 
     overall = round(
-        (station_scores["aggregate"] + ev_scores["aggregate"]) / 2.0, 6
+        ((station_scores["aggregate"] + ev_scores["aggregate"]) / 2.0) * 100, 2
     )
 
-    _write_json(
-        {"run_id": run_id, "scores": station_scores},
-        scoring_dir / "station_score.json",
-    )
-    _write_json(
-        {"run_id": run_id, "scores": ev_scores},
-        scoring_dir / "ev_score.json",
-    )
-    _write_json(
+    write_json(
         {
             "run_id": run_id,
             "simulation_config": simulation_config,
@@ -52,17 +45,19 @@ def run_scoring(
     )
 
     print(f"[Scoring] Written to {scoring_dir}")
-    print(f"  Station aggregate : {station_scores['aggregate']:.4f}")
-    print(f"  EV aggregate : {ev_scores['aggregate']:.4f}")
-    print(f"  Overall : {overall:.4f}")
+    print(f"  Station aggregate : {station_scores['aggregate']:.2f}")
+    print(f"  EV aggregate : {ev_scores['aggregate']:.2f}")
+    print(f"  Overall : {overall:.2f}")
+
+    generate_dashboard(run_id, overall, ev_scores, station_scores, scoring_dir)
 
 
-def _write_json(payload: dict, path: Path) -> None:
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(payload, f, indent=2, default=_json_serialiser)
+def write_json(payload: dict, path: Path) -> None:
+    with open(path, "w", encoding="utf-8") as file:
+        json.dump(payload, file, indent=2, default=json_serialiser)
 
 
-def _json_serialiser(obj):
+def json_serialiser(obj):
     if hasattr(obj, "item"):
         return obj.item()
-    raise TypeError(f"Saving Scores Error: Object of type {type(obj)} is not JSON serialisable")
+    raise TypeError(f"Object of type {type(obj)} is not JSON serialisable")

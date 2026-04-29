@@ -62,7 +62,7 @@ def analyse_arrival(parquet_path: Path, run_id: str, output_root: Path = OUTPUT_
     # Aggregate per (weekday, time slot) if the EV did not drive directly to its destination
     snapshot_df = snapshot_df.filter(pl.col("drive_directly") == False)
 
-    percentiles = [0.25, 0.50, 0.75, 0.90, 0.95, 99]
+    percentiles = [0.25, 0.50, 0.75, 0.90, 0.95, 0.99]
 
     agg_df = (
         snapshot_df

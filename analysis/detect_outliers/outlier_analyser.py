@@ -40,13 +40,13 @@ def detect_outliers(
             df.group_by(group_cols)
             .agg([
                 pl.col(metric).cast(pl.Float32).quantile(0.25).alias("p25"),
-                pl.col(metric).cast(pl.Float32).quantile(90).alias("90"),
+                pl.col(metric).cast(pl.Float32).quantile(0.90).alias("p90"),
             ])
             .with_columns(
-                (pl.col("90") - pl.col("p25")).alias("interquartile_range")
+                (pl.col("p90") - pl.col("p25")).alias("interquartile_range")
             )
             .with_columns([
-                (pl.col("90") + INTERQUARTILE_RANGE_MULTIPLIER * pl.col("interquartile_range")).alias("upper"),
+                (pl.col("p90") + INTERQUARTILE_RANGE_MULTIPLIER * pl.col("interquartile_range")).alias("upper"),
                 (pl.col("p25") - INTERQUARTILE_RANGE_MULTIPLIER * pl.col("interquartile_range")).alias("lower"),
             ])
         )
@@ -66,7 +66,7 @@ def detect_outliers(
                   .otherwise(pl.lit("LOW"))
                   .alias("flag"),
             ])
-            .select(id_cols + group_cols + ["time_label", "metric", "label", "flag", "value", "p25", "90", "upper", "lower"])
+            .select(id_cols + group_cols + ["time_label", "metric", "label", "flag", "value", "p25", "p90", "upper", "lower"])
         )
 
         if not outliers.is_empty():
