@@ -1,67 +1,104 @@
 """
 Module: ev_scorer
-Computes penalty scores for EV behaviour across a simulation run.
+Scores EV behaviour across path deviation, delta arrival time, and missed deadlines.
 
-Lower scores are better. Scores are unbounded above zero.
+Scoring convention:
+- path_deviation : lower is better -> score = 1 - v / max(v)
+- delta_arrival : lower is better -> score = 1 - v / max(v)
+- missed_deadline : lower is better -> score = 1 - mean(missed_deadline_pct / 100)
 
-Only EVs that did NOT drive directly to their destination are considered
-(drive_directly == false), since direct-drive EVs never interact with
-the charging infrastructure and skew the metrics.
-
-Penalty logic:
-  - Path Deviation:    mean + p90  of path_deviation_minutes
-  - Wait Time:         mean + p90  of delta_arrival_minutes
-  - Missed Deadline:   mean(missed_deadline) → gives a rate, e.g. 0.12 = 12%
+Negative path_deviation values (EV arrived faster than direct route) are clamped
+to 0 before scoring.
 """
 
+from __future__ import annotations
 import polars as pl
+
+PERCENTILES = ["p25", "p50", "p75", "p90", "p95"]
+
+# True means higher score is better, False means lower score is better. Is used to either get the direct score, or do 1-score
+EV_PERCENTILE_METRICS: dict[str, bool] = {
+    "path_deviation_minutes": False,
+    "delta_arrival_minutes":  False,
+}
 
 
 def score_evs(
-    arrival_snapshots: pl.DataFrame,
-    arrival_percentiles: pl.DataFrame,
+    ev_percentiles: pl.DataFrame,
+    time_aggregation: str = "max",
 ) -> dict:
-    """
-    Computes EV-level penalty scores from arrival snapshot and percentile data.
+    non_data_cols = {"weekday_name", "simtime_ms", "time_label",
+                     "missed_deadline_pct", "missed_deadline_count", "total_arrivals"}
+    data_cols = [c for c in ev_percentiles.columns if c not in non_data_cols]
 
-    Args:
-        arrival_snapshots:   DataFrame from arrival_snapshots.parquet
-        arrival_percentiles: DataFrame from arrival_percentiles.parquet
+    agg_fn = pl.Expr.max if time_aggregation == "max" else pl.Expr.mean
+    aggregated: dict[str, float] = (
+        ev_percentiles
+        .select([agg_fn(pl.col(c)) for c in data_cols])
+        .row(0, named=True)
+    )
 
-    Returns:
-        A dict with keys: path_deviation_score, wait_time_score, missed_deadline_score
-    """
+    metric_results: dict[str, dict] = {}
+    all_scores: list[float] = []
 
-    # Filter to only EVs that went through the charging infrastructure
-    routed = arrival_snapshots.filter(pl.col("drive_directly") == False)
+    for metric, higher_is_better in EV_PERCENTILE_METRICS.items():
+        pct_values: dict[str, float] = {}
+        for pct in PERCENTILES:
+            col = f"{metric}_{pct}"
+            if col in aggregated:
+                raw = float(aggregated[col])
+                pct_values[pct] = max(0.0, raw)
 
-    if routed.is_empty():
-        return {
-            "path_deviation_score":  None,
-            "wait_time_score":       None,
-            "missed_deadline_score": None,
+        if not pct_values:
+            continue
+
+        ref_max = max(pct_values.values())
+
+        percentile_scores: dict[str, float] = {}
+        for pct, value in pct_values.items():
+            if ref_max == 0.0:
+                score = 1.0
+            else:
+                ratio = value / ref_max
+                score = ratio if higher_is_better else 1.0 - ratio
+            percentile_scores[pct] = round(score, 6)
+
+        metric_score = sum(percentile_scores.values()) / len(percentile_scores)
+        metric_results[metric] = {
+            "higher_is_better":  higher_is_better,
+            "aggregated_values": {k: round(v, 6) for k, v in pct_values.items()},
+            "percentile_scores": percentile_scores,
+            "metric_score":      round(metric_score, 6),
         }
+        all_scores.extend(percentile_scores.values())
 
-    # --- Path Deviation ---
-    # Higher deviation = more detour = higher penalty
-    path_dev_mean = routed["path_deviation_minutes"].mean()
-    path_dev_p90  = arrival_percentiles["path_deviation_minutes_p90"].mean()
+    if "missed_deadline_pct" in ev_percentiles.columns and "total_arrivals" in ev_percentiles.columns:
+        weighted = (
+            ev_percentiles
+            .filter(pl.col("total_arrivals") > 0)
+            .select([
+                (pl.col("missed_deadline_pct") / 100.0 * pl.col("total_arrivals")).alias("weighted_missed"),
+                pl.col("total_arrivals"),
+            ])
+        )
+        total_arrivals = weighted["total_arrivals"].sum()
+        total_missed   = weighted["weighted_missed"].sum()
 
-    path_deviation_score = path_dev_mean + path_dev_p90
+        proportion = float(total_missed / total_arrivals) if total_arrivals > 0 else 0.0
+        md_score   = round(1.0 - proportion, 6)
 
-    # --- Wait Time (delta arrival) ---
-    # Positive delta = arrived later than expected = higher penalty
-    wait_mean = routed["delta_arrival_minutes"].mean()
-    wait_p90  = arrival_percentiles["delta_arrival_minutes_p90"].mean()
+        metric_results["missed_deadline"] = {
+            "higher_is_better": False,
+            "total_arrivals":   int(total_arrivals),
+            "missed_proportion": round(proportion, 6),
+            "metric_score":     md_score,
+        }
+        all_scores.append(md_score)
 
-    wait_time_score = wait_mean + wait_p90
-
-    # --- Missed Deadline ---
-    # Cast bool → int (True=1, False=0), then take mean to get rate
-    missed_deadline_score = routed["missed_deadline"].cast(pl.Int32).mean()
+    aggregate = sum(all_scores) / len(all_scores) if all_scores else 0.0
 
     return {
-        "path_deviation_score":  round(path_deviation_score, 6),
-        "wait_time_score":       round(wait_time_score, 6),
-        "missed_deadline_score": round(missed_deadline_score, 6),
+        "time_aggregation": time_aggregation,
+        "per_metric":       metric_results,
+        "aggregate":        round(aggregate, 6),
     }

@@ -44,12 +44,12 @@ def resolve_run(perkuet_root: Path, uuid: str | None) -> Path:
     if uuid:
         run_dir = perkuet_root / uuid
         if not run_dir.is_dir():
-            raise FileNotFoundError(f"Run '{uuid}' not found in {perkuet_root}")
+            raise FileNotFoundError(f"Error from Main: Run '{uuid}' not found in {perkuet_root}")
         return run_dir
 
     runs = [p for p in perkuet_root.iterdir() if p.is_dir()]
     if not runs:
-        raise FileNotFoundError(f"No simulation runs found in {perkuet_root}")
+        raise FileNotFoundError(f"Error from Main: No simulation runs found in {perkuet_root}")
         
     return max(runs, key=lambda p: p.stat().st_mtime)
 
@@ -66,7 +66,7 @@ def main():
         pipeline.run_all()
         
     except Exception as e:
-        print(f"Error: {e}")
+        print(f"Printing Exception: Error: {e}")
         sys.exit(1)
 
 

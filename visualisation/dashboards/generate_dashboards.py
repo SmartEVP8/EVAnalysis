@@ -343,7 +343,7 @@ def main():
     outlier_path = run_dir / "outliers"  / "station_outliers.parquet"
 
     if not station_path.exists():
-        raise FileNotFoundError(station_path)
+        raise FileNotFoundError(f"Generate Dashboards Error: {station_path} not found")
 
     generate_dashboards(
         run_id              = run_dir.name,

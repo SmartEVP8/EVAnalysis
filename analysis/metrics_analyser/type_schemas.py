@@ -61,7 +61,7 @@ def validate_schema(df: pl.DataFrame, expected: dict[str, pl.DataType], label: s
             errors.append(f"  Missing column: '{col}'")
         elif df.schema[col] != expected_type:
 
-            errors.append(f"  Wrong type for '{col}': expected {expected_type}, got {df.schema[col]}")
+            errors.append(f"  Schema Error: Wrong type for '{col}': expected {expected_type}, got {df.schema[col]}")
 
     if errors:
         raise ValueError(

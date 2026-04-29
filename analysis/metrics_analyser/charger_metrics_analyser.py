@@ -11,7 +11,7 @@ from .type_schemas import CHARGER_SCHEMA, validate_schema
 
 OUTPUT_ROOT = Path("runs")
 
-PERCENTILES = [0.25, 0.50, 0.75, 0.90, 0.95]
+PERCENTILES = [0.25, 0.50, 0.75, 0.90, 0.95, 99]
 
 
 def analyse_charger(parquet_path: Path, run_id: str, output_root: Path = OUTPUT_ROOT) -> None:
@@ -25,10 +25,6 @@ def analyse_charger(parquet_path: Path, run_id: str, output_root: Path = OUTPUT_
     Args:
         parquet_path (Path): The file path to the input parquet file containing charger metrics.
         run_id (str): The unique identifier for the current simulation run, used for output organization.
-
-    Raises:
-        SchemaValidationError: If the input dataframe does not match CHARGER_SCHEMA.
-        FileNotFoundError: If the parquet_path does not exist.
     """
     print(f"\n[Charger] Analysing {parquet_path.name}...")
 

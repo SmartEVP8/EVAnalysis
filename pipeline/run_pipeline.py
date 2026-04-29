@@ -86,7 +86,7 @@ class PipelineRunner:
 
     def file_exists(self, path: Path, description: str) -> bool:
         if not path.exists():
-            raise FileNotFoundError(f"{description} not found at {path}")
+            raise FileNotFoundError(f"Pipeline Error: {description} not found at {path}")
         return True
 
 

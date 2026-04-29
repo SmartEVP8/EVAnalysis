@@ -1,64 +1,77 @@
 """
 Module: station_scorer
-Computes penalty scores for charging station behaviour across a simulation run.
+Scores charging station performance across utilization and queue_size metrics.
 
-Lower scores are better. Scores are unbounded above zero.
+Each metric is aggregated across time (default: max), then each percentile
+column is scored relative to the fleet-wide maximum observed value.
 
-Penalty logic:
-  - Utilization:  (1 - mean) + (1 - p25)   → penalises idle capacity
-  - Queue Size:   mean + p90                → penalises congestion (typical + tail)
-  - Wait Time:    mean + p90                → penalises time spent waiting for a charger
-                  (zero-wait rows included; milliseconds converted to minutes)
+Scoring convention:
+- utilization : higher is better -> score = value / max(value)
+- queue_size : lower  is better -> score = 1 - value / max(value)
+
+The final station score is the mean of all individual percentile scores.
 """
 
+from __future__ import annotations
 import polars as pl
 
-_MS_TO_MINUTES = 1 / 60_000
+PERCENTILES = ["p25", "p50", "p75", "p90", "p95", "p99"]
+
+# True means higher score is better, False means lower score is better. Is used to either get the direct score, or do 1-score
+STATION_METRICS: dict[str, bool] = {
+    "utilization": True,
+    "queue_size": False,
+}
 
 
 def score_stations(
     station_snapshots: pl.DataFrame,
-    station_percentiles: pl.DataFrame,
-    wait_time_metrics: pl.DataFrame,
+    time_aggregation: str = "max",  # "max" or "mean"
 ) -> dict:
-    """
-    Computes station-level penalty scores from snapshot, percentile, and wait time data.
+    agg_fn = pl.Expr.max if time_aggregation == "max" else pl.Expr.mean
+    aggregated: dict[str, float] = (
+        station_snapshots
+        .select([agg_fn(pl.col(c)) for c in station_snapshots.columns if c not in ("weekday_name", "simtime_ms", "time_label")])
+        .row(0, named=True)
+    )
 
-    Args:
-        station_snapshots:   DataFrame from station_snapshots.parquet
-        station_percentiles: DataFrame from station_percentiles.parquet
-        wait_time_metrics:   DataFrame from WaitTimeInQueueMetric.parquet
+    metric_results: dict[str, dict] = {}
+    all_scores: list[float] = []
 
-    Returns:
-        A dict with keys: utilization_score, queue_size_score, wait_time_score
-    """
+    for metric, higher_is_better in STATION_METRICS.items():
+        pct_values: dict[str, float] = {}
+        for pct in PERCENTILES:
+            col = f"{metric}_{pct}"
+            if col in aggregated:
+                pct_values[pct] = float(aggregated[col])
 
-    # --- Utilization ---
-    # Lower utilization = more idle capacity = higher penalty
-    utilization_mean = station_snapshots["utilization"].mean()
-    utilization_p25  = station_percentiles["utilization_p25"].mean()
+        if not pct_values:
+            continue
 
-    utilization_score = (1.0 - utilization_mean) + (1.0 - utilization_p25)
+        ref_max = max(pct_values.values())
 
-    # --- Queue Size ---
-    # Higher queue = more congestion = higher penalty
-    queue_mean = station_snapshots["total_queue_size"].mean()
-    queue_p90  = station_percentiles["queue_size_p90"].mean()
+        percentile_scores: dict[str, float] = {}
+        for pct, value in pct_values.items():
+            if ref_max == 0.0:
+                score = 1.0 if not higher_is_better else 0.0
+            else:
+                ratio = value / ref_max
+                score = ratio if higher_is_better else 1.0 - ratio
+            percentile_scores[pct] = round(score, 6)
 
-    queue_size_score = queue_mean + queue_p90
+        metric_score = sum(percentile_scores.values()) / len(percentile_scores)
+        metric_results[metric] = {
+            "higher_is_better":  higher_is_better,
+            "aggregated_values": {k: round(v, 6) for k, v in pct_values.items()},
+            "percentile_scores": percentile_scores,
+            "metric_score":      round(metric_score, 6),
+        }
+        all_scores.extend(percentile_scores.values())
 
-    # --- Wait Time ---
-    # Convert milliseconds → minutes, then penalise typical + tail behaviour
-    # Zero-wait rows (EV walked straight onto a charger) are included
-    wait_minutes = wait_time_metrics["WaitTimeInQueue"] * _MS_TO_MINUTES
-
-    wait_mean = wait_minutes.mean()
-    wait_p90  = wait_minutes.quantile(0.90, interpolation="nearest")
-
-    wait_time_score = wait_mean + wait_p90
+    aggregate = sum(all_scores) / len(all_scores) if all_scores else 0.0
 
     return {
-        "utilization_score": round(utilization_score, 6),
-        "queue_size_score":  round(queue_size_score, 6),
-        "wait_time_score":   round(wait_time_score, 6),
+        "time_aggregation": time_aggregation,
+        "per_metric": metric_results,
+        "aggregate": round(aggregate, 6),
     }
