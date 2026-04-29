@@ -173,8 +173,8 @@ class PipelineRunner:
         print(f"Run ID: {self.run_id}")
         print(f"Source: {self.paths.run_dir}")
 
-        # self.run_analysis()
-        # self.run_outlier_detection()
-        # self.run_heatmaps()
-        # self.run_dashboards()
+        self.run_analysis()
+        self.run_outlier_detection()
+        self.run_heatmaps()
+        self.run_dashboards()
         self.run_scoring()
