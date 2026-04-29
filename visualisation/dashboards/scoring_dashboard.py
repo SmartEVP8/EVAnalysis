@@ -40,9 +40,7 @@ def score_label(score_0_to_100: float) -> str:
         return "MODERATE"
     return "POOR"
 
-
-
-def draw_ring(axes: plt.Axes, score: float) -> None:
+def draw_ring(axes: plt.Axes, score: float, font_scale: float = 1.0) -> None:
     """Draws the circular score ring in the given axes."""
     axes.set_aspect("equal")
     axes.axis("off")
@@ -95,22 +93,25 @@ def draw_ring(axes: plt.Axes, score: float) -> None:
             circle = plt.Circle((center_x, center_y), cap_radius, color=color, zorder=4)
             axes.add_patch(circle)
 
-    # centre score text
     axes.text(0, 0.08, f"{score:.1f}",
-            horizontalalignment="center", verticalalignment="center", fontsize=28, fontweight="bold",
+            horizontalalignment="center", verticalalignment="center", 
+            fontsize=28 * font_scale, fontweight="bold",
             color=TEXT_PRIMARY_COLOR, zorder=5)
+    
     axes.text(0, -0.22, "out of 100",
-            horizontalalignment="center", verticalalignment="center", fontsize=7,
+            horizontalalignment="center", verticalalignment="center", 
+            fontsize=7 * font_scale,
             color=TEXT_SECONDARY_COLOR, zorder=5)
 
     color = score_color(score)
     label = score_label(score)
     axes.text(0, -0.48, label,
-            horizontalalignment="center", verticalalignment="center", fontsize=6.5, fontweight="bold",
+            horizontalalignment="center", verticalalignment="center", 
+            fontsize=6.5 * font_scale, fontweight="bold",
             color=color, zorder=5,
-            bbox=dict(boxstyle="round,pad=0.3", facecolor=color + "22",
-                      edgecolor=color + "55", linewidth=0.5))
-
+            bbox=dict(boxstyle=f"round,pad={0.3 * font_scale}", facecolor=color + "22",
+                      edgecolor=color + "55", linewidth=0.5 * font_scale))
+    
     axes.set_xlim(-1.25, 1.25)
     axes.set_ylim(-1.25, 1.25)
 
@@ -240,6 +241,9 @@ def generate_dashboard(
         {"name": station_metrics_display_names.get(metric_key, metric_key), "score": round(metric_value["metric_score"] * 100, 1)}
         for metric_key, metric_value in station_metrics_names.items()
     ]
+    
+    ev_total_score = round(ev_scores.get("aggregate", 0) * 100, 2)
+    station_total_score = round(station_scores.get("aggregate", 0) * 100, 2)
 
     fig = plt.figure(figsize=(10, 6.2), facecolor=BACKGROUND)
 
@@ -247,10 +251,10 @@ def generate_dashboard(
         3, 2,
         left=0.03, right=0.97,
         top=0.90, bottom=0.05,
-        wspace=0.06,
-        hspace=0.55,
-        width_ratios=[1, 2],
-        height_ratios=[0.12, 1, 1],
+        wspace=0.1,
+        hspace=0.4, 
+        width_ratios=[1, 1.8],
+        height_ratios=[0.12, 1, 1]
     )
 
     axes_header = fig.add_subplot(gridspec[0, :])
@@ -269,17 +273,28 @@ def generate_dashboard(
                       color=BORDER, linewidth=0.5)
     axes_header.add_line(line)
 
-    axes_ring = fig.add_subplot(gridspec[1:, 0], facecolor=BACKGROUND)
-    axes_ring.set_facecolor(BACKGROUND)
-    draw_ring(axes_ring, overall_display)
+    axes_main_ring = fig.add_subplot(gridspec[1, 0])
+    draw_ring(axes_main_ring, overall)
+    axes_main_ring.set_title("SIMULATION SCORE", color=TEXT_TERTIARY_COLOR, 
+                          fontsize=8, fontweight="bold", pad=-10)
 
-    axes_ev = fig.add_subplot(gridspec[1, 1], facecolor=BACKGROUND)
-    axes_ev.set_facecolor(BACKGROUND)
+    inner_gs = gridspec[2, 0].subgridspec(1, 2, wspace=0.1)
+    
+    axes_ev_ring = fig.add_subplot(inner_gs[0, 0])
+    draw_ring(axes_ev_ring, ev_total_score, font_scale=0.6)
+    axes_ev_ring.text(0, 1.1, "EV SCORE", color=TEXT_TERTIARY_COLOR, 
+                    fontsize=7, horizontalalignment='center', fontweight="bold")
+
+    axes_station_ring = fig.add_subplot(inner_gs[0, 1])
+    draw_ring(axes_station_ring, station_total_score, font_scale=0.6)
+    axes_station_ring.text(0, 1.1, "STATION SCORE", color=TEXT_TERTIARY_COLOR, 
+                    fontsize=7, horizontalalignment='center', fontweight="bold")
+
+    axes_ev = fig.add_subplot(gridspec[1, 1])
     draw_metric_row(axes_ev, ev_metrics, "EV METRICS")
 
-    ax_station = fig.add_subplot(gridspec[2, 1], facecolor=BACKGROUND)
-    ax_station.set_facecolor(BACKGROUND)
-    draw_metric_row(ax_station, station_metrics, "STATION METRICS")
+    axes_station = fig.add_subplot(gridspec[2, 1])
+    draw_metric_row(axes_station, station_metrics, "STATION METRICS")
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(output_path, dpi=180, bbox_inches="tight",

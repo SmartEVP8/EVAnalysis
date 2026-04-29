@@ -36,8 +36,6 @@ class RunPaths:
     arrival_snapshots: Path
     wait_time_metrics: Path
 
-    scoring_dir: Path
-
     stations_locations: Path
 
     outlier_dir: Path
@@ -67,7 +65,6 @@ class RunPaths:
             stations_locations=Path("data/stations_locations.parquet"),
             outlier_dir=outlier_dir,
             station_outliers=outlier_dir / "station_outliers.parquet",
-            scoring_dir=scoring_dir,
             scoring_dir=scoring_dir,
             heatmap_dir=output_root / run_dir.name / "heatmaps",
             dashboard_dir=output_root / run_dir.name / "dashboards",
@@ -176,9 +173,8 @@ class PipelineRunner:
         print(f"Run ID: {self.run_id}")
         print(f"Source: {self.paths.run_dir}")
 
-        self.run_analysis()
-        self.run_outlier_detection()
-        self.run_heatmaps()
-        self.run_dashboards()
-        self.run_scoring()
+        # self.run_analysis()
+        # self.run_outlier_detection()
+        # self.run_heatmaps()
+        # self.run_dashboards()
         self.run_scoring()
