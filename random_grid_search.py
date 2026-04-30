@@ -25,22 +25,19 @@ DEFAULT_GRID_RESULTS_PATH   = PROJECT_ROOT / "runs" / "grid_search_results.csv"
 ENV_VAR_BY_WEIGHT = {
     "price_sensitivity": "COST_WEIGHT_PRICE_SENSITIVITY",
     "path_deviation": "COST_WEIGHT_PATH_DEVIATION",
-    "effective_queue_size": "COST_WEIGHT_EFFECTIVE_QUEUE_SIZE",
-    "urgency": "COST_WEIGHT_URGENCY",
     "expected_wait_time": "COST_WEIGHT_EXPECTED_WAIT_TIME",
 }
 
 RESULT_FIELDNAMES = [
     "iteration",
     "run_id",
+    "seed",
     "status",
     "error",
     "simulation_seconds",
     "analysis_seconds",
     "price_sensitivity",
     "path_deviation",
-    "effective_queue_size",
-    "urgency",
     "expected_wait_time",
 ]
 
@@ -55,9 +52,8 @@ METRIC_FILENAMES = [
 class WeightRanges:
     price_sensitivity: tuple[float, float]
     path_deviation: tuple[float, float]
-    effective_queue_size: tuple[float, float]
-    urgency: tuple[float, float]
     expected_wait_time: tuple[float, float]
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Weight search over SmartEV cost weights.")
@@ -82,10 +78,9 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Optional CSV path. If omitted, defaults to random/grid results file based on --strategy.",
     )
+    parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--price-sensitivity-range", type=float, nargs=2, default=(0.0, 1.0))
     parser.add_argument("--path-deviation-range", type=float, nargs=2, default=(0.0, 1.0))
-    parser.add_argument("--effective-queue-size-range", type=float, nargs=2, default=(0.0, 1.0))
-    parser.add_argument("--urgency-range", type=float, nargs=2, default=(0.0, 1.0))
     parser.add_argument("--expected-wait-time-range", type=float, nargs=2, default=(0.0, 1.0))
 
     parser.add_argument(
@@ -147,8 +142,6 @@ def build_ranges(args: argparse.Namespace) -> WeightRanges:
     return WeightRanges(
         price_sensitivity=validate_range("price_sensitivity", tuple(args.price_sensitivity_range)),
         path_deviation=validate_range("path_deviation", tuple(args.path_deviation_range)),
-        effective_queue_size=validate_range("effective_queue_size", tuple(args.effective_queue_size_range)),
-        urgency=validate_range("urgency", tuple(args.urgency_range)),
         expected_wait_time=validate_range("expected_wait_time", tuple(args.expected_wait_time_range)),
     )
 
@@ -157,10 +150,9 @@ def sample_weights(rng: random.Random, ranges: WeightRanges) -> dict[str, float]
     return {
         "price_sensitivity": rng.uniform(*ranges.price_sensitivity),
         "path_deviation": rng.uniform(*ranges.path_deviation),
-        "effective_queue_size": rng.uniform(*ranges.effective_queue_size),
-        "urgency": rng.uniform(*ranges.urgency),
         "expected_wait_time": rng.uniform(*ranges.expected_wait_time),
     }
+
 
 def random_search_weights(args: argparse.Namespace, ranges: WeightRanges) -> list[dict[str, float]]:
     rng = random.Random()
@@ -172,8 +164,8 @@ def build_grid(points_per_axis: int) -> list[dict[str, float]]:
         raise ValueError("--points-per-axis must be >= 2")
 
     axis_values = [i / (points_per_axis - 1) for i in range(points_per_axis)]
-    keys = list(ENV_VAR_BY_WEIGHT) 
-    
+    keys = list(ENV_VAR_BY_WEIGHT)
+
     return [
         dict(zip(keys, combo))
         for combo in itertools.product(axis_values, repeat=len(keys))
@@ -197,11 +189,13 @@ def run_headless_once(
     build_config: str,
     weights: dict[str, float],
     perkuet_root: Path,
+    session_env: dict[str, str],
 ) -> Path:
     existing_run_names = list_run_dirs(perkuet_root)
     started_at = time.time()
 
     env = os.environ.copy()
+    env.update(session_env)
     env.update({ENV_VAR_BY_WEIGHT[name]: f"{value:.8f}" for name, value in weights.items()})
 
     subprocess.run(
@@ -254,8 +248,10 @@ def validate_metrics_parquet(run_dir: Path) -> None:
         except Exception as e:
             raise RuntimeError(f"Corrupt Parquet file '{path.name}': {e}")
 
+
 def run_analysis(run_dir: Path, output_root: Path) -> None:
     PipelineRunner(run_dir, output_root=output_root).run_all()
+
 
 def append_result_row(csv_path: Path, row: dict[str, Any]) -> None:
     csv_path.parent.mkdir(parents=True, exist_ok=True)
@@ -267,10 +263,12 @@ def append_result_row(csv_path: Path, row: dict[str, Any]) -> None:
             writer.writeheader()
         writer.writerow(row)
 
+
 def build_result_row(
     *,
     iteration: int,
     weights: dict[str, float],
+    seed: int,
     run_id: str = "",
     status: str = "ok",
     error: str = "",
@@ -280,6 +278,7 @@ def build_result_row(
     return {
         "iteration": iteration,
         "run_id": run_id,
+        "seed": seed,
         "status": status,
         "error": error,
         "simulation_seconds": f"{simulation_seconds:.4f}",
@@ -291,6 +290,7 @@ def build_result_row(
         "expected_wait_time": f"{weights['expected_wait_time']:.8f}",
     }
 
+
 def run_trial(
     *,
     iteration: int,
@@ -299,14 +299,17 @@ def run_trial(
     build_config: str,
     perkuet_root: Path,
     output_root: Path,
+    session_env: dict[str, str],
+    seed: int,
 ) -> dict[str, Any]:
     sim_start = time.perf_counter()
-    
+
     run_dir = run_headless_once(
         headless_project=headless_project,
         build_config=build_config,
         weights=weights,
         perkuet_root=perkuet_root,
+        session_env=session_env,
     )
     validate_metrics_parquet(run_dir)
 
@@ -321,10 +324,12 @@ def run_trial(
     return build_result_row(
         iteration=iteration,
         weights=weights,
+        seed=seed,
         run_id=run_dir.name,
         simulation_seconds=simulation_seconds,
         analysis_seconds=analysis_seconds,
     )
+
 
 def main() -> None:
     os.chdir(PROJECT_ROOT)
@@ -340,9 +345,16 @@ def main() -> None:
         results_path = session_dir / f"{args.strategy}_search_results.csv"
     else:
         results_path = args.results_file if args.results_file.is_absolute() else (PROJECT_ROOT / args.results_file).resolve()
+
     output_root = session_dir
     perkuet_root = load_perkuet_root()
     ranges = build_ranges(args)
+
+    session_env = {
+        "ENGINE_SEED": str(args.seed),
+        "SIMULATION_START_TIME_MS": "86400000",   # Start monday 00:00 (ms)
+        "SIMULATION_END_TIME_MS": "108000000",    # End at tuesday 00:00 (ms) 259200000
+    }
 
     if args.strategy == "random":
         all_weights = random_search_weights(args, ranges)
@@ -369,10 +381,12 @@ def main() -> None:
                     build_config=args.build_config,
                     perkuet_root=perkuet_root,
                     output_root=output_root,
+                    session_env=session_env,
+                    seed=args.seed,
                 )
             except Exception as exc:
                 print(f"  Iteration failed: {exc}")
-                row = build_result_row(iteration=iteration, weights=weights, status="error", error=str(exc))
+                row = build_result_row(iteration=iteration, weights=weights, seed=args.seed, status="error", error=str(exc))
 
             append_result_row(results_path, row)
 
