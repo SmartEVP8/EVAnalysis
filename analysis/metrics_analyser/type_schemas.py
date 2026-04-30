@@ -28,6 +28,7 @@ STATION_SCHEMA: dict[str, pl.DataType] = {
     "TotalChargers":     pl.Int32,
     "Reservations":      pl.UInt32,
     "Cancellations":     pl.UInt32,
+    "ExpectedWaitTimeMiliseconds": pl.UInt32,
 }
 
 ARRIVE_AT_DESTINATION_SCHEMA: dict[str, pl.DataType] = {
