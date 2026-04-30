@@ -10,7 +10,10 @@ from pathlib import Path
 from analysis.metrics_analyser.station_metrics_analyser import analyse_station
 from analysis.metrics_analyser.charger_metrics_analyser import analyse_charger
 from analysis.metrics_analyser.arrival_metrics_analyser import analyse_arrival
+from analysis.metrics_analyser.waittime_metrics_analyser import analyse_wait_time
 from analysis.detect_outliers.outlier_analyser import process_outliers
+from analysis.scoring.save_scores import run_scoring
+from analysis.scoring.save_scores import run_scoring
 from visualisation.heatmaps.heatmaps_loader import load_heatmap_data
 from visualisation.heatmaps.renderer import render_all
 from visualisation.dashboards.generate_dashboards import generate_dashboards
@@ -32,6 +35,7 @@ class RunPaths:
     analysis_dir: Path
     station_snapshots: Path
     arrival_snapshots: Path
+    wait_time_metrics: Path
 
     stations_locations: Path
 
@@ -41,11 +45,16 @@ class RunPaths:
     heatmap_dir: Path
     dashboard_dir: Path
 
+    scoring_dir: Path
+    station_percentiles: Path
+    arrival_percentiles: Path
+
     @classmethod
     def from_run_dir(run_paths: RunPaths, run_dir: Path, output_root: Path = Path("runs")) -> "RunPaths":
         analysis_dir = output_root / run_dir.name / "analysis"
         outlier_dir  = output_root / run_dir.name / "outliers"
-        return run_paths(
+        scoring_dir  = output_root / run_dir.name / "scoring"
+        return RunPaths(
             run_dir=run_dir,
             station_metrics=run_dir / "StationSnapshotMetric.parquet",
             charger_metrics=run_dir / "ChargerSnapshotMetric.parquet",
@@ -53,11 +62,15 @@ class RunPaths:
             analysis_dir=analysis_dir,
             station_snapshots=analysis_dir / "station_snapshots.parquet",
             arrival_snapshots=analysis_dir / "arrival_snapshots.parquet",
+            wait_time_metrics=run_dir / "WaitTimeInQueueMetric.parquet",
             stations_locations=Path("data/stations_locations.parquet"),
             outlier_dir=outlier_dir,
             station_outliers=outlier_dir / "station_outliers.parquet",
+            scoring_dir=scoring_dir,
             heatmap_dir=output_root / run_dir.name / "heatmaps",
             dashboard_dir=output_root / run_dir.name / "dashboards",
+            station_percentiles=output_root / run_dir.name / "percentiles" / "station" / "station_percentiles.parquet",
+            arrival_percentiles=output_root / run_dir.name / "percentiles" / "arrival" / "arrival_percentiles.parquet",
         )
 
 
@@ -74,7 +87,7 @@ class PipelineRunner:
 
     def file_exists(self, path: Path, description: str) -> bool:
         if not path.exists():
-            raise FileNotFoundError(f"{description} not found at {path}")
+            raise FileNotFoundError(f"Pipeline Error: {description} not found at {path}")
         return True
 
 
@@ -90,6 +103,9 @@ class PipelineRunner:
 
         if self.file_exists(p.arrival_metrics, "Arrival metrics"):
             analyse_arrival(p.arrival_metrics, self.run_id, self.output_root)
+
+        if self.file_exists(p.wait_time_metrics, "Wait Time Metrics"):
+            analyse_wait_time(p.wait_time_metrics, self.run_id, self.output_root)
 
 
     def run_outlier_detection(self) -> None:
@@ -143,6 +159,20 @@ class PipelineRunner:
         )
 
 
+    def run_scoring(self) -> None:
+        p = self.paths
+        self.file_exists(p.station_percentiles, "Station percentiles")
+        self.file_exists(p.arrival_percentiles, "Arrival percentiles")
+
+        run_scoring(
+            run_id = self.run_id,
+            station_snapshots = pl.read_parquet(p.station_percentiles),
+            ev_percentiles = pl.read_parquet(p.arrival_percentiles),
+            simulation_config = {"source": str(p.run_dir)},
+            output_root = self.output_root,
+        )
+
+
     def run_all(self) -> None:
         print(f"Run ID: {self.run_id}")
         print(f"Source: {self.paths.run_dir}")
@@ -151,3 +181,4 @@ class PipelineRunner:
         self.run_outlier_detection()
         self.run_heatmaps()
         self.run_dashboards()
+        self.run_scoring()

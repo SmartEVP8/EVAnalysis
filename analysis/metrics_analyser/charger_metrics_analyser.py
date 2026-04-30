@@ -11,7 +11,7 @@ from .type_schemas import CHARGER_SCHEMA, validate_schema
 
 OUTPUT_ROOT = Path("runs")
 
-PERCENTILES = [0.25, 0.50, 0.75, 0.90, 0.95]
+PERCENTILES = [0.25, 0.50, 0.75, 0.90, 0.95, 0.99]
 
 
 def analyse_charger(parquet_path: Path, run_id: str, output_root: Path = OUTPUT_ROOT) -> None:
@@ -21,14 +21,6 @@ def analyse_charger(parquet_path: Path, run_id: str, output_root: Path = OUTPUT_
     This function reads raw parquet data, adds temporal metadata (days of simulation run (e.g., 0, 1, 2)),
     weekdays (e.g., Monday, Tuesday), and time labels (e.g., "08:00-09:00"), validates the schema integrity,
     and exports both a sorted snapshot log and aggregated percentiles for charger utilization and queue sizes.
-
-    Args:
-        parquet_path (Path): The file path to the input parquet file containing charger metrics.
-        run_id (str): The unique identifier for the current simulation run, used for output organization.
-
-    Raises:
-        SchemaValidationError: If the input dataframe does not match CHARGER_SCHEMA.
-        FileNotFoundError: If the parquet_path does not exist.
     """
     print(f"\n[Charger] Analysing {parquet_path.name}...")
 

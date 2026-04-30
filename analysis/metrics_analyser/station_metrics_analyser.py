@@ -11,7 +11,7 @@ from .type_schemas import STATION_SCHEMA, validate_schema
 
 OUTPUT_ROOT = Path("runs")
 
-PERCENTILES = [0.25, 0.50, 0.75, 0.90, 0.95]
+PERCENTILES = [0.25, 0.50, 0.75, 0.90, 0.95, 0.99]
 
 
 def analyse_station(parquet_path: Path, run_id: str, output_root: Path = OUTPUT_ROOT) -> None:
@@ -21,14 +21,6 @@ def analyse_station(parquet_path: Path, run_id: str, output_root: Path = OUTPUT_
     This function processes station snapshot data to derive key performance 
     indicators (KPIs), handles division-by-zero guards, and exports logs
     and statistical summaries.
-
-    Args:
-        parquet_path (Path): The file path to the input parquet file containing station metrics.
-        run_id (str): The unique identifier for the current simulation run.
-
-    Raises:
-        SchemaValidationError: If the input dataframe does not match STATION_SCHEMA.
-        FileNotFoundError: If the parquet_path does not exist.
     """
     print(f"\n[Station] Analysing {parquet_path.name}...")
 

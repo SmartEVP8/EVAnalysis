@@ -65,7 +65,7 @@ def main():
     arrival_path = run_dir / "analysis" / "arrival_snapshots.parquet"
 
     if not station_path.exists():
-        raise FileNotFoundError(f"station_snapshots.parquet not found at {station_path}")
+        raise FileNotFoundError(f"Daily Dashboard Error: station_snapshots.parquet not found at {station_path}")
 
     generate_daily_summaries(
         run_id = run_dir.name,

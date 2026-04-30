@@ -113,7 +113,7 @@ def load_heatmap_data(
 
     if joined.is_empty():
         raise ValueError(
-            "Join failed: StationId mismatch between snapshots and stations file. "
+            "Heatmap Error: Join failed: StationId mismatch between snapshots and stations file. "
             "Check if the station metadata matches the simulation run."
         )
 
