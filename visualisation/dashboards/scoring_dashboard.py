@@ -219,13 +219,13 @@ def generate_dashboard(
     station_scores : the station_scores dict from run_scoring()
     output_path : full path to write the PNG (e.g. scoring_dir / "dashboard.png")
     """
-    overall_display = overall
 
     ev_metrics_names = ev_scores.get("per_metric", {})
     ev_metrics_display_names = {
         "path_deviation_minutes": "Path deviation",
         "delta_arrival_minutes": "Delta arrival",
         "missed_deadline": "Missed deadline",
+        "ev_wait_time": "Wait Time In Queue"
     }
     ev_metrics = [
         {"name": ev_metrics_display_names.get(metric_key, metric_key), "score": round(metric_value["metric_score"] * 100, 1)}
@@ -245,7 +245,7 @@ def generate_dashboard(
     ev_total_score = round(ev_scores.get("aggregate", 0) * 100, 2)
     station_total_score = round(station_scores.get("aggregate", 0) * 100, 2)
 
-    fig = plt.figure(figsize=(10, 6.2), facecolor=BACKGROUND)
+    fig = plt.figure(figsize=(13, 6.2), facecolor=BACKGROUND)
 
     gridspec = fig.add_gridspec(
         3, 2,
@@ -253,7 +253,7 @@ def generate_dashboard(
         top=0.90, bottom=0.05,
         wspace=0.1,
         hspace=0.4, 
-        width_ratios=[1, 1.8],
+        width_ratios=[1, 2.4],
         height_ratios=[0.12, 1, 1]
     )
 

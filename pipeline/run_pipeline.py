@@ -10,6 +10,7 @@ from pathlib import Path
 from analysis.metrics_analyser.station_metrics_analyser import analyse_station
 from analysis.metrics_analyser.charger_metrics_analyser import analyse_charger
 from analysis.metrics_analyser.arrival_metrics_analyser import analyse_arrival
+from analysis.metrics_analyser.waittime_metrics_analyser import analyse_wait_time
 from analysis.detect_outliers.outlier_analyser import process_outliers
 from analysis.scoring.save_scores import run_scoring
 from analysis.scoring.save_scores import run_scoring
@@ -102,6 +103,9 @@ class PipelineRunner:
 
         if self.file_exists(p.arrival_metrics, "Arrival metrics"):
             analyse_arrival(p.arrival_metrics, self.run_id, self.output_root)
+
+        if self.file_exists(p.wait_time_metrics, "Wait Time Metrics"):
+            analyse_wait_time(p.wait_time_metrics, self.run_id, self.output_root)
 
 
     def run_outlier_detection(self) -> None:

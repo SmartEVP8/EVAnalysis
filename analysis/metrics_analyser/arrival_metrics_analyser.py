@@ -15,21 +15,68 @@ that context.
 
 from pathlib import Path
 import polars as pl
+import numpy as np
 from .type_schemas import ARRIVE_AT_DESTINATION_SCHEMA, validate_schema
 from init.loader import add_arrival_day_columns_to_parquet
 
 OUTPUT_ROOT = Path("runs")
 
 
+def load_snapshot_time_buckets(run_id: str, output_root: Path) -> pl.Series:
+    """
+    Returns the sorted unique simtime_ms values from station_snapshots.parquet.
+    """
+    station_snapshots_path = output_root / run_id / "analysis" / "station_snapshots.parquet"
+    if not station_snapshots_path.exists():
+        raise FileNotFoundError(
+            f"station_snapshots.parquet not found at {station_snapshots_path}. "
+            "Run analyse_station() before analyse_arrival()."
+        )
+    buckets = (
+        pl.read_parquet(station_snapshots_path)
+        .select("simtime_ms")
+        .unique()
+        .sort("simtime_ms")
+        ["simtime_ms"]
+    )
+    return buckets
+
+
+def snap_to_nearest_bucket(df: pl.DataFrame, buckets: pl.Series) -> pl.DataFrame:
+    buckets_arrivals = buckets.to_numpy()
+
+    arrival_milliseconds = df["simtime_ms"].to_numpy()
+
+    right_index = np.searchsorted(buckets_arrivals, arrival_milliseconds)
+    left_index  = np.clip(right_index - 1, 0, len(buckets_arrivals) - 1)
+    right_index = np.clip(right_index, 0, len(buckets_arrivals) - 1)
+
+    left_dist  = np.abs(arrival_milliseconds - buckets_arrivals[left_index])
+    right_dist = np.abs(arrival_milliseconds - buckets_arrivals[right_index])
+
+    nearest_index = np.where(left_dist <= right_dist, left_index, right_index)
+    nearest_ticks = buckets_arrivals[nearest_index]
+
+    return df.with_columns([
+        pl.Series("simtime_ms", nearest_ticks).cast(pl.Int64),
+        (
+            ((pl.Series("simtime_ms", nearest_ticks) // 1000 // 3600).cast(pl.Utf8).str.zfill(2))
+            + pl.lit(":")
+            + (((pl.Series("simtime_ms", nearest_ticks) // 1000 % 3600) // 60).cast(pl.Utf8).str.zfill(2))
+        ).alias("time_label"),
+    ])
+
 def analyse_arrival(parquet_path: Path, run_id: str, output_root: Path = OUTPUT_ROOT) -> None:
     """
     Analyses EV arrival deadline compliance and path deviation for a simulation run.
 
-    Reads raw arrival snapshot data, enriches it with temporal metadata, then
-    aggregates per time slot to produce:
+    Reads raw arrival snapshot data, enriches it with temporal metadata, snaps
+    each EV's arrival time to the nearest station snapshot tick, then aggregates
+    per time slot to produce:
       - missed_deadline_pct : share of EVs that missed their deadline (0–100)
       - path_deviation_minutes*  : percentile distribution of route deviation in minutes
       - delta_arrival_* : percentile distribution of arrival time delta in minutes
+      - ev_wait_time : percentile distribution of wait time in queues for evs in minutes
     """
     print(f"\n[Arrival] Analysing {parquet_path.name}...")
 
@@ -39,12 +86,8 @@ def analyse_arrival(parquet_path: Path, run_id: str, output_root: Path = OUTPUT_
 
     snapshot_df = df.with_columns([
         (pl.col("PathDeviation") / 1000 / 60).alias("path_deviation_minutes"),
-
         (pl.col("DeltaArrivalTime") / 1000 / 60).alias("delta_arrival_minutes"),
-
         pl.col("MissedDeadline").cast(pl.Boolean).alias("missed_deadline"),
-
-        # Preserve the direct-drive flag so downstream filters can use it.
         pl.col("DriveDirectlyToDestination").cast(pl.Boolean).alias("drive_directly"),
     ]).select([
         "day", "weekday_name", "simtime_ms", "time_label",
@@ -59,7 +102,10 @@ def analyse_arrival(parquet_path: Path, run_id: str, output_root: Path = OUTPUT_
     snapshot_df.write_parquet(out_analysis / "arrival_snapshots.parquet")
     print(f"  Saved arrival_snapshots.parquet ({len(snapshot_df)} rows)")
 
-    # Aggregate per (weekday, time slot) if the EV did not drive directly to its destination
+    time_buckets = load_snapshot_time_buckets(run_id, output_root)
+    snapshot_df = snap_to_nearest_bucket(snapshot_df, time_buckets)
+
+    # Exclude direct-drive EVs from charging-related metrics
     snapshot_df = snapshot_df.filter(pl.col("drive_directly") == False)
 
     percentiles = [0.25, 0.50, 0.75, 0.90, 0.95, 0.99]
@@ -69,7 +115,6 @@ def analyse_arrival(parquet_path: Path, run_id: str, output_root: Path = OUTPUT_
         .group_by(["weekday_name", "simtime_ms", "time_label"])
         .agg(
             [
-                # Percentage of EVs that missed their deadline in this slot
                 (pl.col("missed_deadline").sum() / pl.col("missed_deadline").count() * 100)
                     .alias("missed_deadline_pct"),
 

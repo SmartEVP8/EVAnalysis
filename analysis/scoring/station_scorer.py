@@ -27,7 +27,7 @@ STATION_METRICS: dict[str, bool] = {
 
 def score_stations(
     station_snapshots: pl.DataFrame,
-    time_aggregation: str = "max", # "max" or "mean"
+    time_aggregation: str,
 ) -> dict:
     aggregation = pl.Expr.max if time_aggregation == "max" else pl.Expr.mean
     aggregated: dict[str, float] = (

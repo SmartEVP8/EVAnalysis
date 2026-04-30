@@ -3,8 +3,9 @@ Module: ev_scorer
 Scores EV behaviour across path deviation, delta arrival time, and missed deadlines.
 
 Scoring convention:
-- path_deviation : lower is better  -> score = 1 - grouping / max(grouping) [already minutes]
-- delta_arrival : lower is better  -> score = 1 - grouping / max(grouping) [already minutes]
+- path_deviation : lower is better  -> score = 1 - grouping / max(grouping)
+- delta_arrival : lower is better  -> score = 1 - grouping / max(grouping)
+- ev_wait_time : lower is better -> score = 1 - grouping / max(grouping)
 - missed_deadline : lower is better  -> score = 1 - mean(missed_deadline_pct / 100)
 
 Negative path_deviation values (EV arrived faster than direct route) are clamped
@@ -21,12 +22,13 @@ PERCENTILES = ["p25", "p50", "p75", "p90", "p95", "p99"]
 EV_PERCENTILE_METRICS: dict[str, bool] = {
     "path_deviation_minutes": False,
     "delta_arrival_minutes":  False,
+    "ev_wait_time": False,
 }
 
 
 def score_evs(
     ev_percentiles: pl.DataFrame,
-    time_aggregation: str = "max", # "max" or "mean"
+    time_aggregation: str,
 ) -> dict:
     non_data_columns = {"weekday_name", "simtime_ms", "time_label",
                      "missed_deadline_pct", "missed_deadline_count", "total_arrivals"}
