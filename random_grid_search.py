@@ -4,7 +4,6 @@ import argparse
 import csv
 import itertools
 import os
-import random
 import subprocess
 import time
 import tomllib
@@ -19,8 +18,7 @@ from pipeline.run_pipeline import PipelineRunner
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 DEFAULT_HEADLESS_PROJECT = PROJECT_ROOT.parent / "SmartEV" / "Headless" / "Headless.csproj"
-DEFAULT_RANDOM_RESULTS_PATH = PROJECT_ROOT / "runs" / "random_search_results.csv"
-DEFAULT_GRID_RESULTS_PATH   = PROJECT_ROOT / "runs" / "grid_search_results.csv"
+DEFAULT_GRID_RESULTS_PATH = PROJECT_ROOT / "runs" / "grid_search_results.csv"
 
 ENV_VAR_BY_WEIGHT = {
     "price_sensitivity": "COST_WEIGHT_PRICE_SENSITIVITY",
@@ -34,8 +32,6 @@ RESULT_FIELDNAMES = [
     "seed",
     "status",
     "error",
-    "simulation_seconds",
-    "analysis_seconds",
     "price_sensitivity",
     "path_deviation",
     "expected_wait_time",
@@ -45,20 +41,14 @@ METRIC_FILENAMES = [
     "StationSnapshotMetric.parquet",
     "ChargerSnapshotMetric.parquet",
     "ArrivalAtDestinationMetric.parquet",
+    "WaitTimeInQueueMetric.parquet",
 ]
 
 
-@dataclass(frozen=True)
-class WeightRanges:
-    price_sensitivity: tuple[float, float]
-    path_deviation: tuple[float, float]
-    expected_wait_time: tuple[float, float]
-
-
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Weight search over SmartEV cost weights.")
+    parser = argparse.ArgumentParser(description="Grid search over SmartEV cost weights.")
 
-    parser.add_argument("--iterations", type=int, default=10, help="Number of random trials to run.")
+    parser.add_argument("--iterations", type=int, default=10, help="Number of trials to run.")
     parser.add_argument(
         "--headless-project",
         type=Path,
@@ -76,29 +66,16 @@ def parse_args() -> argparse.Namespace:
         "--results-file",
         type=Path,
         default=None,
-        help="Optional CSV path. If omitted, defaults to random/grid results file based on --strategy.",
+        help="Optional CSV path. If omitted, defaults to grid results file.",
     )
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--price-sensitivity-range", type=float, nargs=2, default=(0.0, 1.0))
-    parser.add_argument("--path-deviation-range", type=float, nargs=2, default=(0.0, 1.0))
-    parser.add_argument("--expected-wait-time-range", type=float, nargs=2, default=(0.0, 1.0))
-
-    parser.add_argument(
-        "--strategy",
-        "--s",
-        dest="strategy",
-        type=str,
-        default="random",
-        choices=["random", "grid"],
-        help="Search strategy to use (default: random).",
-    )
 
     parser.add_argument(
         "--points-per-axis",
         type=int,
         default=5,
-        help="Grid search: number of evenly-spaced values per weight axis (e.g. 5 → [0, 0.25, 0.5, 0.75, 1]). "
-             "Total trials = points_per_axis ** 5.",
+        help="Number of evenly-spaced values per weight axis (e.g. 5 → [0, 0.25, 0.5, 0.75, 1]). "
+             "Total trials = points_per_axis ** 3.",
     )
 
     return parser.parse_args()
@@ -131,34 +108,6 @@ def resolve_path(path: Path, *, must_be: str = "file") -> Path:
     return path
 
 
-def validate_range(name: str, bounds: tuple[float, float]) -> tuple[float, float]:
-    low, high = bounds
-    if low > high:
-        raise ValueError(f"Invalid range for {name}: min ({low}) > max ({high})")
-    return low, high
-
-
-def build_ranges(args: argparse.Namespace) -> WeightRanges:
-    return WeightRanges(
-        price_sensitivity=validate_range("price_sensitivity", tuple(args.price_sensitivity_range)),
-        path_deviation=validate_range("path_deviation", tuple(args.path_deviation_range)),
-        expected_wait_time=validate_range("expected_wait_time", tuple(args.expected_wait_time_range)),
-    )
-
-
-def sample_weights(rng: random.Random, ranges: WeightRanges) -> dict[str, float]:
-    return {
-        "price_sensitivity": rng.uniform(*ranges.price_sensitivity),
-        "path_deviation": rng.uniform(*ranges.path_deviation),
-        "expected_wait_time": rng.uniform(*ranges.expected_wait_time),
-    }
-
-
-def random_search_weights(args: argparse.Namespace, ranges: WeightRanges) -> list[dict[str, float]]:
-    rng = random.Random()
-    return [sample_weights(rng, ranges) for _ in range(args.iterations)]
-
-
 def build_grid(points_per_axis: int) -> list[dict[str, float]]:
     if points_per_axis < 2:
         raise ValueError("--points-per-axis must be >= 2")
@@ -172,9 +121,9 @@ def build_grid(points_per_axis: int) -> list[dict[str, float]]:
     ]
 
 
-def create_search_session_dir(strategy: str) -> Path:
+def create_search_session_dir() -> Path:
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    session_dir = PROJECT_ROOT / "runs" / "search_sessions" / f"{strategy}_{timestamp}"
+    session_dir = PROJECT_ROOT / "runs" / "search_sessions" / f"grid_{timestamp}"
     session_dir.mkdir(parents=True, exist_ok=False)
     return session_dir
 
@@ -335,20 +284,16 @@ def main() -> None:
     os.chdir(PROJECT_ROOT)
     args = parse_args()
 
-    if args.iterations <= 0:
-        raise ValueError("--iterations must be > 0")
-
     headless_project = resolve_path(args.headless_project, must_be="file")
-    session_dir = create_search_session_dir(args.strategy)
+    session_dir = create_search_session_dir()
 
     if args.results_file is None:
-        results_path = session_dir / f"{args.strategy}_search_results.csv"
+        results_path = session_dir / "grid_search_results.csv"
     else:
         results_path = args.results_file if args.results_file.is_absolute() else (PROJECT_ROOT / args.results_file).resolve()
 
     output_root = session_dir
     perkuet_root = load_perkuet_root()
-    ranges = build_ranges(args)
 
     session_env = {
         "ENGINE_SEED": str(args.seed),
@@ -356,12 +301,9 @@ def main() -> None:
         "SIMULATION_END_TIME_MS": "108000000",    # End at tuesday 00:00 (ms) 259200000
     }
 
-    if args.strategy == "random":
-        all_weights = random_search_weights(args, ranges)
-    else:
-        all_weights = build_grid(args.points_per_axis)
-
+    all_weights = build_grid(args.points_per_axis)
     total = len(all_weights)
+
     print(f"Running {total} trials")
     print(f"Headless project : {headless_project}")
     print(f"Perkuet root     : {perkuet_root}")
