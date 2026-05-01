@@ -20,7 +20,7 @@ from pathlib import Path
 import polars as pl
 
 from helpers.io_helpers import infer_snapshot_interval_ms
-
+from helpers.constants import PERCENTILES
 
 PATH_DEVIATION_BUCKETS: list[tuple[float, int]] = [
     (5,            1),
@@ -42,6 +42,8 @@ DELTA_ARRIVAL_BUCKETS: list[tuple[float, int]] = [
     (float("inf"), 1),
 ]
 DELTA_ARRIVAL_BUCKET_LABELS: list[str] = ["0", "5", "10", "15", "30", "60", "60+"]
+
+PERCENTILE_NAMES:  list[str] = ["p25", "p50", "p75", "p90", "p95", "p99"]
 
 METRIC_WEIGHTS: dict[str, int] = {
     "path_deviation":  1,
@@ -90,17 +92,17 @@ def wait_score_expr() -> pl.Expr:
     exp( -(45 / 45)² ) = exp(-1) ≈ 0.3679
     exp( -(90 / 45)² ) = exp(-4) ≈ 0.0183
     """
-    x = pl.col("wait_minutes")
-    return ((-((x / WAIT_DECAY_MINUTES) ** 2)).exp()).mean().alias("ev_wait_time_score")
+    wait_time_score = pl.col("wait_minutes")
+    return ((-((wait_time_score / WAIT_DECAY_MINUTES) ** 2)).exp()).mean().alias("ev_wait_time_score")
 
 
 def missed_deadline_exprs() -> list[pl.Expr]:
     """
     Returns aggregation expressions for missed-deadline statistics per group.
     """
-    total      = pl.len()
-    direct     = pl.col("drive_directly").sum()
-    missed     = pl.col("missed_deadline").sum()
+    total = pl.len()
+    direct = pl.col("drive_directly").sum()
+    missed = pl.col("missed_deadline").sum()
     not_direct = total - direct
     proportion = pl.when(not_direct > 0).then(missed / not_direct).otherwise(0.0)
 
@@ -155,7 +157,14 @@ def compute_ev_scores(run_id: str, output_root: Path) -> EVScores:
     wait_scores = (
         wait_time_df
         .group_by("simtime_ms")
-        .agg([wait_score_expr()])
+        .agg([
+            wait_score_expr().alias("ev_wait_time_score"),
+
+            *[
+                pl.col("wait_minutes").quantile(percentile).alias(f"wait_minutes_{name}")
+                for percentile, name in zip(PERCENTILES, PERCENTILE_NAMES)
+            ],
+        ])
     )
 
     per_snapshot = (
