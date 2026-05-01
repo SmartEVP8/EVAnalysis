@@ -19,18 +19,11 @@ from .denmark import DenmarkGrid, build_land_mask, load_denmark_boundary
 from .heatmaps_loader import HeatmapDataset, SnapshotFrame
 
 METRICS: list[tuple[str, str]] = [
-    ("queue_size", "total_queue_size"),
     ("utilization", "utilization"),
     ("cancellation_rate", "cancellation_rate"),
 ]
 
 METRIC_CONFIG: dict[str, dict] = {
-    "queue_size": {
-        "cmap": "magma",
-        "colorbar_label": "Queue size",
-        "vmin": 0.0,
-        "vmax": 10.0,
-    },
     "utilization": {
         "cmap": "magma",
         "colorbar_label": "Utilization",
@@ -46,7 +39,6 @@ METRIC_CONFIG: dict[str, dict] = {
 }
 
 _METRIC_DISPLAY_NAMES: dict[str, str] = {
-    "queue_size": "Queue Size",
     "utilization": "Utilization",
     "cancellation_rate": "Cancellation Rate",
 }

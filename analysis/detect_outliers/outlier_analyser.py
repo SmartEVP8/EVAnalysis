@@ -13,9 +13,9 @@ OUTPUT_ROOT = Path("runs")
 
 INTERQUARTILE_RANGE_MULTIPLIER = 3
 
-STATION_METRICS = ["utilization", "total_queue_size"]
+STATION_METRICS = ["utilization"]
 
-CHARGER_METRICS = ["Utilization", "QueueSize"]
+CHARGER_METRICS = ["Utilization"]
 
 
 def detect_outliers(

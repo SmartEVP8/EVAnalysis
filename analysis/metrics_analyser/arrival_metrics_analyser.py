@@ -86,7 +86,12 @@ def analyse_arrival(parquet_path: Path, run_id: str, output_root: Path = OUTPUT_
     snapshot_df = (
         df.with_columns([
             (pl.col("PathDeviation") / 1000 / 60).alias("path_deviation_minutes"),
-            (pl.col("DeltaArrivalTime") / 1000 / 60).alias("delta_arrival_minutes"),
+
+            (
+                (pl.col("ActualArrivalTime") - pl.col("ExpectedArrivalTime"))
+                .clip(lower_bound=0) / 1000 / 60
+            ).alias("delta_arrival_minutes"),
+
             pl.col("MissedDeadline").cast(pl.Boolean).alias("missed_deadline"),
             pl.col("DriveDirectlyToDestination").cast(pl.Boolean).alias("drive_directly"),
         ])
@@ -94,6 +99,7 @@ def analyse_arrival(parquet_path: Path, run_id: str, output_root: Path = OUTPUT_
             pl.col("path_deviation_minutes")
                 .cut(breaks=DEVIATION_BUCKETS, labels=DEVIATION_LABELS)
                 .alias("path_deviation_bucket"),
+
             pl.col("delta_arrival_minutes")
                 .cut(breaks=DEVIATION_BUCKETS, labels=DEVIATION_LABELS)
                 .alias("delta_arrival_bucket"),

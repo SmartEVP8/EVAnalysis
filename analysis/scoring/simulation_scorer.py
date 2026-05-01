@@ -9,8 +9,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from ev_scorer import EVScores, compute_ev_scores
-from station_scorer import StationScores, compute_station_scores
+from analysis.scoring.ev_scorer import EVScores, compute_ev_scores
+from analysis.scoring.station_scorer import StationScores, compute_station_scores
 
 
 GROUP_WEIGHTS: dict[str, int] = {
@@ -62,7 +62,7 @@ def compute_simulation_score(
     if output_path is None:
         output_path = output_root / run_id / "simulation_score.json"
 
-    ev_scores      = compute_ev_scores(run_id, output_root)
+    ev_scores = compute_ev_scores(run_id, output_root)
     station_scores = compute_station_scores(run_id, output_root)
 
     result = SimulationScore(

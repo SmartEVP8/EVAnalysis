@@ -1,7 +1,7 @@
 """
 Module for analyzing electric vehicle charger metrics.
 Provides functionality to process snapshot data, validate schemas, 
-and generate statistical analysis for utilization and queue'ing.
+and generate statistical analysis for utilization.
 """
 
 from pathlib import Path
@@ -20,7 +20,7 @@ def analyse_charger(parquet_path: Path, run_id: str, output_root: Path = OUTPUT_
     
     This function reads raw parquet data, adds temporal metadata (days of simulation run (e.g., 0, 1, 2)),
     weekdays (e.g., Monday, Tuesday), and time labels (e.g., "08:00-09:00"), validates the schema integrity,
-    and exports both a sorted snapshot log and aggregated percentiles for charger utilization and queue sizes.
+    and exports both a sorted snapshot log and aggregated percentiles for charger utilization.
     """
     print(f"\n[Charger] Analysing {parquet_path.name}...")
 
@@ -36,8 +36,7 @@ def analyse_charger(parquet_path: Path, run_id: str, output_root: Path = OUTPUT_
         "StationId", "ChargerId",
         "day", "weekday_name",
         "simtime_ms", "time_label",
-        "Utilization", "QueueSize",
-        "DeliveredKW", "TargetEVDemandKW",
+        "Utilization", "DeliveredKW", "TargetEVDemandKW",
     ]).sort(["StationId", "ChargerId", "day", "simtime_ms"])
 
     snapshot_df.write_parquet(out_analysis / "charger_snapshots.parquet")
@@ -53,9 +52,6 @@ def analyse_charger(parquet_path: Path, run_id: str, output_root: Path = OUTPUT_
         .group_by(["weekday_name", "simtime_ms", "time_label"])
         .agg(
             [pl.col("Utilization").quantile(q).alias(f"utilization_p{int(q*100)}")
-             for q in PERCENTILES]
-            +
-            [pl.col("QueueSize").quantile(q).alias(f"queue_size_p{int(q*100)}")
              for q in PERCENTILES]
         )
         .sort(["weekday_name", "simtime_ms"])

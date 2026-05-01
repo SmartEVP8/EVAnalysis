@@ -21,7 +21,6 @@ import visualisation.dashboards.charts.cancellation_rate_diagram as cancellation
 import visualisation.dashboards.charts.outlier_diagram as outliers_distribution
 import visualisation.dashboards.charts.price_diagram as price_diagram
 import visualisation.dashboards.charts.station_utilization_diagram as utilization_distribution
-import visualisation.dashboards.charts.station_queue_diagram as queue_size_distribution
 
 
 BG = "#0f1117"
@@ -120,7 +119,6 @@ def render_dashboard(
 ) -> None:
 
     average_utilization = current_station_df["utilization"].mean()
-    average_queue = current_station_df["total_queue_size"].mean()
 
     day_of_sim = current_station_df["day"][0]
     weekday = current_station_df["weekday_name"][0]
@@ -155,7 +153,7 @@ def render_dashboard(
 
     kpi_data = [
         ("Avg Utilization",  f"{average_utilization:.2%}", None),
-        ("Avg Queue Size",   f"{average_queue:.2f}", None),
+        # ("Avg Queue Size",   f"{average_queue:.2f}", None),
         ("Missed Deadlines", missed_value, missed_subtitle),
     ]
     for i, (label, value, subtitle) in enumerate(kpi_data):
@@ -164,7 +162,7 @@ def render_dashboard(
     # Row 2
     distribution_grid = gridspec.GridSpecFromSubplotSpec(1, 3, subplot_spec=figure_grid[2], wspace=0.08)
     utilization_distribution.render(figure.add_subplot(distribution_grid[0]), station_snapshot_df, simtime_ms)
-    queue_size_distribution.render(figure.add_subplot(distribution_grid[1]), station_snapshot_df, simtime_ms)
+    # queue_size_distribution.render(figure.add_subplot(distribution_grid[1]), station_snapshot_df, simtime_ms)
     price_diagram.render(figure.add_subplot(distribution_grid[2]), station_snapshot_df, simtime_ms)
 
     # Row 3
@@ -175,8 +173,8 @@ def render_dashboard(
 
     # Row 4
     heatmap_grid = gridspec.GridSpecFromSubplotSpec(1, 3, subplot_spec=figure_grid[4], wspace=0.04)
-    heatmap_names  = ["utilization", "queue_size", "cancellation_rate"]
-    heatmap_titles = ["UTILIZATION", "QUEUE SIZE", "CANCELLATION"]
+    heatmap_names  = ["utilization", "cancellation_rate"]
+    heatmap_titles = ["UTILIZATION", "CANCELLATION"]
     for i, (heatmap_name, heatmap_title) in enumerate(zip(heatmap_names, heatmap_titles)):
         path = heatmap_directory / heatmap_name / f"{heatmap_name}_{index - 1}.png"
         draw_heatmap_panel(figure.add_subplot(heatmap_grid[i]), load_image_as_array(path), heatmap_title)

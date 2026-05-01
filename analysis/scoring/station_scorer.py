@@ -134,11 +134,13 @@ def compute_station_scores(run_id: str, output_root: Path) -> StationScores:
     path = output_root / run_id / "analysis" / "station_snapshots.parquet"
     snapshots = pl.read_parquet(path)
 
-    # Add placeholder column if not yet present in the parquet
     if "station_expected_wait_time" not in snapshots.columns:
-        snapshots = snapshots.with_columns(
-            pl.lit(None).cast(pl.Float64).alias("station_expected_wait_time")
-        )
+        if "expected_wait_minutes" in snapshots.columns:
+            snapshots = snapshots.with_columns(
+                pl.col("expected_wait_minutes").alias("station_expected_wait_time")
+            )
+        else:
+            raise ValueError("Expected column 'station_expected_wait_time' not found")
 
     ticks = (
         snapshots.select("simtime_ms").unique().sort("simtime_ms")["simtime_ms"].to_list()

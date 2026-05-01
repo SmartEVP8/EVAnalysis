@@ -39,8 +39,8 @@ def analyse_station(parquet_path: Path, run_id: str, output_root: Path = OUTPUT_
               .then(pl.col("TotalDeliveredKWh") / pl.col("TotalMaxKWh"))
               .otherwise(None)
               .alias("utilization"),
-
-            pl.col("TotalQueueSize").alias("total_queue_size"),
+            
+            (pl.col("ExpectedWaitTimeMiliseconds") / 60_000).alias("expected_wait_minutes"),
 
             pl.when(pl.col("Reservations") > 0)
               .then(pl.col("Cancellations") / pl.col("Reservations"))
@@ -49,8 +49,9 @@ def analyse_station(parquet_path: Path, run_id: str, output_root: Path = OUTPUT_
         ])
         .select([
             "StationId", "day", "weekday_name", "simtime_ms", 
-            "time_label", "utilization", "total_queue_size", "Price", 
-            "Reservations", "Cancellations", "cancellation_rate", "TotalChargers",
+            "time_label", "utilization", "Price", "Reservations", 
+            "Cancellations", "cancellation_rate", "TotalChargers", 
+            "ExpectedWaitTimeMiliseconds", "expected_wait_minutes",
         ])
     )
 
@@ -72,10 +73,10 @@ def analyse_station(parquet_path: Path, run_id: str, output_root: Path = OUTPUT_
             [pl.col("utilization").quantile(q).alias(f"utilization_p{int(q*100)}")
              for q in PERCENTILES]
             +
-            [pl.col("total_queue_size").quantile(q).alias(f"queue_size_p{int(q*100)}")
-             for q in PERCENTILES]
-            +
             [pl.col("Price").quantile(q).alias(f"price_p{int(q*100)}")
+             for q in PERCENTILES]
+             +
+            [pl.col("expected_wait_minutes").quantile(q).alias(f"wait_time_p{int(q*100)}")
              for q in PERCENTILES]
         )
         .sort(["weekday_name", "simtime_ms"])

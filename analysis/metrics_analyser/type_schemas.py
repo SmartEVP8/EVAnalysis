@@ -11,7 +11,6 @@ CHARGER_SCHEMA: dict[str, pl.DataType] = {
     "StationId":        pl.UInt16,
     "ChargerId":        pl.Int32,
     "MaxKWh":           pl.Float32,
-    "QueueSize":        pl.Int32,
     "Utilization":      pl.Float32,
     "DeliveredKW":      pl.Float32,
     "IsDual":           pl.Boolean,
@@ -19,22 +18,21 @@ CHARGER_SCHEMA: dict[str, pl.DataType] = {
 }
 
 STATION_SCHEMA: dict[str, pl.DataType] = {
-    "SimTime":           pl.UInt32,
-    "StationId":         pl.UInt16,
-    "TotalDeliveredKWh": pl.Float32,
-    "TotalMaxKWh":       pl.Float32,
-    "TotalQueueSize":    pl.Int32,
-    "Price":             pl.Float32,
-    "TotalChargers":     pl.Int32,
-    "Reservations":      pl.UInt32,
-    "Cancellations":     pl.UInt32,
+    "SimTime":                     pl.UInt32,
+    "StationId":                   pl.UInt16,
+    "TotalDeliveredKWh":           pl.Float32,
+    "TotalMaxKWh":                 pl.Float32,
+    "Price":                       pl.Float32,
+    "TotalChargers":               pl.Int32,
+    "Reservations":                pl.UInt32,
+    "Cancellations":               pl.UInt32,
+    "ExpectedWaitTimeMiliseconds": pl.UInt32,
 }
 
 ARRIVE_AT_DESTINATION_SCHEMA: dict[str, pl.DataType] = {
     "ExpectedArrivalTime":      pl.UInt32,
     "ActualArrivalTime":        pl.UInt32,
     "PathDeviation":            pl.Int32,
-    "DeltaArrivalTime":         pl.Int32,
     "MissedDeadline":           pl.Boolean,
 }
 

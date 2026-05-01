@@ -12,7 +12,7 @@ from analysis.metrics_analyser.charger_metrics_analyser import analyse_charger
 from analysis.metrics_analyser.arrival_metrics_analyser import analyse_arrival
 from analysis.metrics_analyser.waittime_metrics_analyser import analyse_wait_time
 from analysis.detect_outliers.outlier_analyser import process_outliers
-from analysis.scoring.simulation_scorer import run_scoring
+from analysis.scoring.simulation_scorer import compute_simulation_score
 from visualisation.heatmaps.heatmaps_loader import load_heatmap_data
 from visualisation.heatmaps.renderer import render_all
 from visualisation.dashboards.generate_dashboards import generate_dashboards
@@ -69,7 +69,7 @@ class RunPaths:
             heatmap_dir=output_root / run_dir.name / "heatmaps",
             dashboard_dir=output_root / run_dir.name / "dashboards",
             station_percentiles=output_root / run_dir.name / "percentiles" / "station" / "station_percentiles.parquet",
-            arrival_buckets=output_root / run_dir.name / "percentiles" / "arrival" / "arrival_buckets.parquet",
+            arrival_buckets=output_root / run_dir.name / "buckets" / "arrival" / "arrival_buckets.parquet",
         )
 
 
@@ -163,12 +163,10 @@ class PipelineRunner:
         self.file_exists(p.station_percentiles, "Station percentiles")
         self.file_exists(p.arrival_buckets, "Arrival buckets")
 
-        run_scoring(
-            run_id = self.run_id,
-            station_snapshots = pl.read_parquet(p.station_percentiles),
-            ev_percentiles = pl.read_parquet(p.arrival_buckets),
-            simulation_config = {"source": str(p.run_dir)},
-            output_root = self.output_root,
+        compute_simulation_score(
+            run_id=self.run_id,
+            source_path=str(p.run_dir),
+            output_root=self.output_root,
         )
 
 
