@@ -28,7 +28,7 @@ METRIC_WEIGHTS: dict[str, int] = {
 WAIT_DECAY_MINUTES: float = 45.0
 
 
-def wait_score_expr(wait_col: str) -> pl.Expr:
+def wait_score_expr(wait_time_column: str) -> pl.Expr:
     """
     Gaussian decay score for wait time: exp(-(x/WAIT_DECAY_MINUTES)²), averaged per group.
 
@@ -38,8 +38,20 @@ def wait_score_expr(wait_col: str) -> pl.Expr:
     exp( -(45 / 45)² ) = exp(-1) ≈ 0.3679
     exp( -(90 / 45)² ) = exp(-4) ≈ 0.0183
     """
-    x = pl.col(wait_col)
-    return (-((x / WAIT_DECAY_MINUTES) ** 2)).exp()
+    expected_wait_score = pl.col(wait_time_column)
+    return (-((expected_wait_score / WAIT_DECAY_MINUTES) ** 2)).exp()
+
+
+def utilization_score_expr() -> pl.Expr:
+    """
+    Normalizes utilization relative to the maximum utilization in the current group.
+    """
+    max_util = pl.col("utilization").max()
+    return (
+        pl.when(max_util > 0)
+        .then(pl.col("utilization") / max_util)
+        .otherwise(0.0)
+    )
 
 
 def compute_station_scores(run_id: str, output_root: Path) -> StationScores:
@@ -52,31 +64,32 @@ def compute_station_scores(run_id: str, output_root: Path) -> StationScores:
     snapshots_path = output_root / run_id / "analysis" / "station_snapshots.parquet"
     snapshots = pl.read_parquet(snapshots_path)
 
-    wait_col = "expected_wait_minutes"
-    if wait_col not in snapshots.columns:
+    wait_time_column = "expected_wait_minutes"
+    if wait_time_column not in snapshots.columns:
         raise ValueError(
-            f"Expected column '{wait_col}' not found in {snapshots_path}"
+            f"Expected column '{wait_time_column}' not found in {snapshots_path}"
         )
 
-    snapshots = snapshots.with_columns(
-        wait_score_expr(wait_col).alias("wait_score")
-    )
+    snapshots = snapshots.with_columns([
+        wait_score_expr(wait_time_column).alias("wait_score"),
+        utilization_score_expr().alias("norm_utilization")
+    ])
+
 
     per_bucket = (
         snapshots
         .group_by("simtime_ms")
         .agg([
-            (
-                pl.when(pl.col("utilization").max() > 0)
-                  .then(pl.col("utilization") / pl.col("utilization").max())
-                  .otherwise(0.0)
-            ).mean().alias("utilization_score"),
+            pl.col("norm_utilization").mean().alias("utilization_score"),
+            *[
+                pl.col("norm_utilization").quantile(percentile).alias(f"utilization_{name}")
+                for percentile, name in zip(PERCENTILES, PERCENTILE_NAMES)
+            ],
 
             pl.col("wait_score").mean().alias("expected_wait_score"),
-
             *[
-                pl.col("wait_score").quantile(p).alias(f"wait_score_{name}")
-                for p, name in zip(PERCENTILES, PERCENTILE_NAMES)
+                pl.col("expected_wait_minutes").quantile(percentile).alias(f"wait_mins_{name}")
+                for percentile, name in zip(PERCENTILES, PERCENTILE_NAMES)
             ],
         ])
         .fill_nan(0.0)
@@ -99,7 +112,6 @@ def compute_station_scores(run_id: str, output_root: Path) -> StationScores:
         weighted_aggregate=weighted_aggregate,
         number_of_stations=snapshots["StationId"].n_unique(),
     )
-
 
 
 @dataclass
