@@ -14,7 +14,6 @@ class Snap:
     """Standardized column names found in the processed snapshot files."""
     STATION_ID = "StationId"
     UTILIZATION = "utilization"
-    QUEUE = "total_queue_size"
     CANCELLATION = "cancellation_rate"
     DAY = "day"
     TIME = "simtime_ms"
@@ -96,7 +95,6 @@ def load_heatmap_data(
         "snapshot_id",
         Snap.STATION_ID,
         Snap.UTILIZATION,
-        Snap.QUEUE,
         Snap.CANCELLATION,
         "weekday_name",
         "day",

@@ -1,177 +1,185 @@
 """
-Module: run_pipeline
 Defines the main execution pipeline for the EVAnalysis project.
-Coordinates the flow from raw parquet metrics to statistical analysis and final heatmaps.
+
+Coordinates the flow from raw Parquet metrics to statistical analysis,
+outlier detection, spatial heatmaps, interval/daily dashboards, and scoring.
 """
+
+from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
 
+import polars as pl
+
+from helpers.constants import OUTPUT_ROOT
 from analysis.metrics_analyser.station_metrics_analyser import analyse_station
 from analysis.metrics_analyser.charger_metrics_analyser import analyse_charger
 from analysis.metrics_analyser.arrival_metrics_analyser import analyse_arrival
 from analysis.metrics_analyser.waittime_metrics_analyser import analyse_wait_time
 from analysis.detect_outliers.outlier_analyser import process_outliers
-from analysis.scoring.save_scores import run_scoring
-from analysis.scoring.save_scores import run_scoring
+from analysis.scoring.simulation_scorer import compute_simulation_score
 from visualisation.heatmaps.heatmaps_loader import load_heatmap_data
 from visualisation.heatmaps.renderer import render_all
 from visualisation.dashboards.generate_dashboards import generate_dashboards
 from visualisation.dashboards.daily_summaries.generate_daily_dashboard import generate_daily_summaries
 
-import polars as pl
-
 
 @dataclass(frozen=True)
 class RunPaths:
-    """
-    All file paths associated with a single simulation run.
-    """
+    """All file paths associated with a single simulation run."""
+
     run_dir: Path
+
+    # Raw simulation inputs
     station_metrics: Path
     charger_metrics: Path
     arrival_metrics: Path
+    wait_time_metrics: Path
 
+    # Derived analysis outputs
     analysis_dir: Path
     station_snapshots: Path
     arrival_snapshots: Path
-    wait_time_metrics: Path
 
+    # Static reference data
     stations_locations: Path
 
+    # Outlier detection outputs
     outlier_dir: Path
     station_outliers: Path
 
+    # Visualisation outputs
     heatmap_dir: Path
     dashboard_dir: Path
 
-    scoring_dir: Path
+    # Aggregation outputs used by scoring
     station_percentiles: Path
-    arrival_percentiles: Path
+    arrival_buckets: Path
 
     @classmethod
-    def from_run_dir(run_paths: RunPaths, run_dir: Path, output_root: Path = Path("runs")) -> "RunPaths":
+    def from_run_dir(cls, run_dir: Path, output_root: Path = OUTPUT_ROOT) -> RunPaths:
         analysis_dir = output_root / run_dir.name / "analysis"
-        outlier_dir  = output_root / run_dir.name / "outliers"
-        scoring_dir  = output_root / run_dir.name / "scoring"
-        return RunPaths(
+        outlier_dir = output_root / run_dir.name / "outliers"
+
+        return cls(
             run_dir=run_dir,
+
             station_metrics=run_dir / "StationSnapshotMetric.parquet",
             charger_metrics=run_dir / "ChargerSnapshotMetric.parquet",
             arrival_metrics=run_dir / "ArrivalAtDestinationMetric.parquet",
+            wait_time_metrics=run_dir / "WaitTimeInQueueMetric.parquet",
+
             analysis_dir=analysis_dir,
             station_snapshots=analysis_dir / "station_snapshots.parquet",
             arrival_snapshots=analysis_dir / "arrival_snapshots.parquet",
-            wait_time_metrics=run_dir / "WaitTimeInQueueMetric.parquet",
+
             stations_locations=Path("data/stations_locations.parquet"),
+
             outlier_dir=outlier_dir,
             station_outliers=outlier_dir / "station_outliers.parquet",
-            scoring_dir=scoring_dir,
+
             heatmap_dir=output_root / run_dir.name / "heatmaps",
             dashboard_dir=output_root / run_dir.name / "dashboards",
-            station_percentiles=output_root / run_dir.name / "percentiles" / "station" / "station_percentiles.parquet",
-            arrival_percentiles=output_root / run_dir.name / "percentiles" / "arrival" / "arrival_percentiles.parquet",
+
+            station_percentiles=(
+                output_root / run_dir.name / "percentiles" / "station"
+                / "station_percentiles.parquet"
+            ),
+            arrival_buckets=(
+                output_root / run_dir.name / "buckets" / "arrival"
+                / "arrival_buckets.parquet"
+            ),
         )
 
 
 class PipelineRunner:
-    """
-    Orchestrates the data processing and visualisation pipeline for a simulation run.
-    """
+    """Orchestrates the data processing and visualisation pipeline for a simulation run."""
 
-    def __init__(self, run_dir: Path, output_root: Path = Path("runs")):
+    def __init__(self, run_dir: Path, output_root: Path = OUTPUT_ROOT) -> None:
         self.run_id = run_dir.name
         self.output_root = output_root
         self.paths = RunPaths.from_run_dir(run_dir, output_root)
 
 
-    def file_exists(self, path: Path, description: str) -> bool:
+    def _assert_file_exists(self, path: Path, description: str) -> None:
         if not path.exists():
-            raise FileNotFoundError(f"Pipeline Error: {description} not found at {path}")
-        return True
+            raise FileNotFoundError(
+                f"Pipeline error: {description} not found at {path}"
+            )
+
+    def _read_parquet_if_exists(self, path: Path) -> pl.DataFrame:
+        return pl.read_parquet(path) if path.exists() else pl.DataFrame()
 
 
     def run_analysis(self) -> None:
-        """Runs metric analysis for stations, chargers, and EV arrivals."""
-        p = self.paths
+        paths = self.paths
 
-        if self.file_exists(p.station_metrics, "Station metrics"):
-            analyse_station(p.station_metrics, self.run_id, self.output_root)
+        self._assert_file_exists(paths.charger_metrics, "Charger metrics")
+        analyse_charger(paths.charger_metrics, self.run_id, self.output_root)
 
-        if self.file_exists(p.charger_metrics, "Charger metrics"):
-            analyse_charger(p.charger_metrics, self.run_id, self.output_root)
+        self._assert_file_exists(paths.station_metrics, "Station metrics")
+        analyse_station(paths.station_metrics, self.run_id, self.output_root)
 
-        if self.file_exists(p.arrival_metrics, "Arrival metrics"):
-            analyse_arrival(p.arrival_metrics, self.run_id, self.output_root)
+        self._assert_file_exists(paths.arrival_metrics, "Arrival metrics")
+        analyse_arrival(paths.arrival_metrics, self.run_id, self.output_root)
 
-        if self.file_exists(p.wait_time_metrics, "Wait Time Metrics"):
-            analyse_wait_time(p.wait_time_metrics, self.run_id, self.output_root)
-
+        self._assert_file_exists(paths.wait_time_metrics, "Wait time metrics")
+        analyse_wait_time(paths.wait_time_metrics, self.run_id, self.output_root)
 
     def run_outlier_detection(self) -> None:
-        """Flags statistical outliers in the processed snapshot data."""
         process_outliers(self.run_id, self.output_root)
 
-
     def run_heatmaps(self) -> None:
-        """Renders spatial heatmaps from the analysed station snapshots."""
-        p = self.paths
-
-        self.file_exists(p.station_snapshots, "Station snapshots")
+        paths = self.paths
+        self._assert_file_exists(paths.station_snapshots, "Station snapshots")
 
         dataset = load_heatmap_data(
-            snapshots_path=p.station_snapshots,
-            stations_path=p.stations_locations,
+            snapshots_path=paths.station_snapshots,
+            stations_path=paths.stations_locations,
         )
-
         render_all(
             dataset,
-            output_dir=p.heatmap_dir,
+            output_dir=paths.heatmap_dir,
             resolution_km=5.0,
             use_land_mask=True,
             dpi=150,
         )
 
-
     def run_dashboards(self) -> None:
-        """Renders a per-snapshot dashboard image for the simulation run."""
-        p = self.paths
+        paths = self.paths
+        self._assert_file_exists(paths.station_snapshots, "Station snapshots")
 
-        self.file_exists(p.station_snapshots, "Station snapshots")
-
-        interval_dir = p.dashboard_dir / "intervals"
-        daily_dir = p.dashboard_dir / "daily"
+        station_snapshot_df = pl.read_parquet(paths.station_snapshots)
+        arrival_snapshot_df = self._read_parquet_if_exists(paths.arrival_snapshots)
+        outlier_analysis_df = self._read_parquet_if_exists(paths.station_outliers)
 
         generate_dashboards(
-            run_id = self.run_id,
-            station_snapshot_df = pl.read_parquet(p.station_snapshots),
-            arrival_snapshot_df = pl.read_parquet(p.arrival_snapshots) if p.arrival_snapshots.exists() else pl.DataFrame(),
-            outlier_analysis_df = pl.read_parquet(p.station_outliers) if p.station_outliers.exists() else pl.DataFrame(),
-            heatmap_dir = p.heatmap_dir,
-            out_dir = interval_dir,
+            run_id=self.run_id,
+            station_snapshot_df=station_snapshot_df,
+            arrival_snapshot_df=arrival_snapshot_df,
+            outlier_analysis_df=outlier_analysis_df,
+            heatmap_dir=paths.heatmap_dir,
+            out_dir=paths.dashboard_dir / "intervals",
         )
 
         generate_daily_summaries(
-            run_id = self.run_id,
-            station_snapshot_df = pl.read_parquet(p.station_snapshots),
-            arrival_snapshot_df = pl.read_parquet(p.arrival_snapshots) if p.arrival_snapshots.exists() else pl.DataFrame(),
-            out_dir = daily_dir,
+            run_id=self.run_id,
+            station_snapshot_df=station_snapshot_df,
+            arrival_snapshot_df=arrival_snapshot_df,
+            out_dir=paths.dashboard_dir / "daily",
         )
-
 
     def run_scoring(self) -> None:
-        p = self.paths
-        self.file_exists(p.station_percentiles, "Station percentiles")
-        self.file_exists(p.arrival_percentiles, "Arrival percentiles")
+        paths = self.paths
+        self._assert_file_exists(paths.station_percentiles, "Station percentiles")
+        self._assert_file_exists(paths.arrival_buckets, "Arrival buckets")
 
-        run_scoring(
-            run_id = self.run_id,
-            station_snapshots = pl.read_parquet(p.station_percentiles),
-            ev_percentiles = pl.read_parquet(p.arrival_percentiles),
-            simulation_config = {"source": str(p.run_dir)},
-            output_root = self.output_root,
+        compute_simulation_score(
+            run_id=self.run_id,
+            source_path=str(paths.run_dir),
+            output_root=self.output_root,
         )
-
 
     def run_all(self) -> None:
         print(f"Run ID: {self.run_id}")
@@ -179,6 +187,6 @@ class PipelineRunner:
 
         self.run_analysis()
         self.run_outlier_detection()
-        self.run_heatmaps()
-        self.run_dashboards()
+        #self.run_heatmaps()
+        #self.run_dashboards()
         self.run_scoring()
