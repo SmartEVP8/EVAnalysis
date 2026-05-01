@@ -26,6 +26,12 @@ ENV_VAR_BY_WEIGHT = {
     "expected_wait_time": "COST_WEIGHT_EXPECTED_WAIT_TIME",
 }
 
+WEIGHT_RANGES = {
+    "price_sensitivity": (0, 10),
+    "path_deviation": (0, 100),
+    "expected_wait_time": (0, 100),
+}
+
 RESULT_FIELDNAMES = [
     "iteration",
     "run_id",
@@ -122,12 +128,16 @@ def build_grid(points_per_axis: int) -> list[dict[str, float]]:
     if points_per_axis < 2:
         raise ValueError("--points-per-axis must be >= 2")
 
-    axis_values = [i / (points_per_axis - 1) for i in range(points_per_axis)]
     keys = list(ENV_VAR_BY_WEIGHT)
+    axes = []
+    for key in keys:
+        lo, hi = WEIGHT_RANGES[key]
+        step = (hi - lo) / (points_per_axis - 1)
+        axes.append([lo + i * step for i in range(points_per_axis)])
 
     return [
         dict(zip(keys, combo))
-        for combo in itertools.product(axis_values, repeat=len(keys))
+        for combo in itertools.product(*axes)
     ]
 
 
@@ -362,7 +372,7 @@ def main() -> None:
     session_env = {
         "ENGINE_SEED": str(args.seed),
         "SIMULATION_START_TIME_MS": "86400000",   # Start monday 00:00 (ms)
-        "SIMULATION_END_TIME_MS": "108000000",    # End at tuesday 00:00 (ms) 259200000(6hours) 
+        "SIMULATION_END_TIME_MS": "96400000",    # End at tuesday 00:00 (ms) 259200000(6hours) 
     }
 
     all_weights = build_grid(args.points_per_axis)
