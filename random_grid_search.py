@@ -7,7 +7,6 @@ import os
 import subprocess
 import time
 import tomllib
-from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -15,6 +14,7 @@ from typing import Any
 import polars as pl
 
 from pipeline.run_pipeline import PipelineRunner
+from analysis.scoring.simulation_scorer import compute_simulation_score
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 DEFAULT_HEADLESS_PROJECT = PROJECT_ROOT.parent / "SmartEV" / "Headless" / "Headless.csproj"
@@ -32,6 +32,12 @@ RESULT_FIELDNAMES = [
     "seed",
     "status",
     "error",
+    "simulation_seconds",
+    "analysis_seconds",
+    "score_seconds",
+    "ev_aggregate",
+    "station_aggregate",
+    "overall_score",
     "price_sensitivity",
     "path_deviation",
     "expected_wait_time",
@@ -202,6 +208,20 @@ def run_analysis(run_dir: Path, output_root: Path) -> None:
     PipelineRunner(run_dir, output_root=output_root).run_all()
 
 
+def run_scoring(run_id: str, output_root: Path) -> dict[str, float]:
+    """Compute simulation score and return EV/station/overall aggregates."""
+    sim_score = compute_simulation_score(
+        run_id=run_id,
+        source_path=str(output_root),
+        output_root=output_root,
+    )
+    return {
+        "ev_aggregate": sim_score.ev_scores.weighted_aggregate,
+        "station_aggregate": sim_score.station_scores.weighted_aggregate,
+        "overall_score": sim_score.overall_aggregate,
+    }
+
+
 def append_result_row(csv_path: Path, row: dict[str, Any]) -> None:
     csv_path.parent.mkdir(parents=True, exist_ok=True)
     write_header = not csv_path.exists()
@@ -223,6 +243,10 @@ def build_result_row(
     error: str = "",
     simulation_seconds: float = 0.0,
     analysis_seconds: float = 0.0,
+    score_seconds: float = 0.0,
+    ev_aggregate: float = 0.0,
+    station_aggregate: float = 0.0,
+    overall_score: float = 0.0,
 ) -> dict[str, Any]:
     return {
         "iteration": iteration,
@@ -232,10 +256,12 @@ def build_result_row(
         "error": error,
         "simulation_seconds": f"{simulation_seconds:.4f}",
         "analysis_seconds": f"{analysis_seconds:.4f}",
+        "score_seconds": f"{score_seconds:.4f}",
+        "ev_aggregate": f"{ev_aggregate:.6f}",
+        "station_aggregate": f"{station_aggregate:.6f}",
+        "overall_score": f"{overall_score:.6f}",
         "price_sensitivity": f"{weights['price_sensitivity']:.8f}",
         "path_deviation": f"{weights['path_deviation']:.8f}",
-        "effective_queue_size": f"{weights['effective_queue_size']:.8f}",
-        "urgency": f"{weights['urgency']:.8f}",
         "expected_wait_time": f"{weights['expected_wait_time']:.8f}",
     }
 
@@ -270,6 +296,16 @@ def run_trial(
     analysis_seconds = time.perf_counter() - analysis_start
     print(f"  Analysis complete ({analysis_seconds:.2f}s)")
 
+    score_start = time.perf_counter()
+    score_values = run_scoring(run_dir.name, output_root)
+    score_seconds = time.perf_counter() - score_start
+    print(
+        f"  Scoring complete ({score_seconds:.2f}s) - "
+        f"EV: {score_values['ev_aggregate']:.6f}, "
+        f"Station: {score_values['station_aggregate']:.6f}, "
+        f"Overall: {score_values['overall_score']:.6f}"
+    )
+
     return build_result_row(
         iteration=iteration,
         weights=weights,
@@ -277,6 +313,10 @@ def run_trial(
         run_id=run_dir.name,
         simulation_seconds=simulation_seconds,
         analysis_seconds=analysis_seconds,
+        score_seconds=score_seconds,
+        ev_aggregate=score_values["ev_aggregate"],
+        station_aggregate=score_values["station_aggregate"],
+        overall_score=score_values["overall_score"],
     )
 
 
