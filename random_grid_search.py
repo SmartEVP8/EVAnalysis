@@ -35,6 +35,10 @@ RESULT_FIELDNAMES = [
     "simulation_seconds",
     "analysis_seconds",
     "score_seconds",
+    "missed_deadline_aggregate",
+    "ev_wait_time_aggregate",
+    "utilization_aggregate",
+    "expected_wait_time_aggregate",
     "ev_aggregate",
     "station_aggregate",
     "overall_score",
@@ -209,13 +213,17 @@ def run_analysis(run_dir: Path, output_root: Path) -> None:
 
 
 def run_scoring(run_id: str, output_root: Path) -> dict[str, float]:
-    """Compute simulation score and return EV/station/overall aggregates."""
+    """Compute simulation score and return component and aggregate scores."""
     sim_score = compute_simulation_score(
         run_id=run_id,
         source_path=str(output_root),
         output_root=output_root,
     )
     return {
+        "missed_deadline_aggregate": sim_score.ev_scores.missed_deadline_aggregate,
+        "ev_wait_time_aggregate": sim_score.ev_scores.ev_wait_time_aggregate,
+        "utilization_aggregate": sim_score.station_scores.utilization_aggregate,
+        "expected_wait_time_aggregate": sim_score.station_scores.expected_wait_time_aggregate,
         "ev_aggregate": sim_score.ev_scores.weighted_aggregate,
         "station_aggregate": sim_score.station_scores.weighted_aggregate,
         "overall_score": sim_score.overall_aggregate,
@@ -244,6 +252,10 @@ def build_result_row(
     simulation_seconds: float = 0.0,
     analysis_seconds: float = 0.0,
     score_seconds: float = 0.0,
+    missed_deadline_aggregate: float = 0.0,
+    ev_wait_time_aggregate: float = 0.0,
+    utilization_aggregate: float = 0.0,
+    expected_wait_time_aggregate: float = 0.0,
     ev_aggregate: float = 0.0,
     station_aggregate: float = 0.0,
     overall_score: float = 0.0,
@@ -257,6 +269,10 @@ def build_result_row(
         "simulation_seconds": f"{simulation_seconds:.4f}",
         "analysis_seconds": f"{analysis_seconds:.4f}",
         "score_seconds": f"{score_seconds:.4f}",
+        "missed_deadline_aggregate": f"{missed_deadline_aggregate:.6f}",
+        "ev_wait_time_aggregate": f"{ev_wait_time_aggregate:.6f}",
+        "utilization_aggregate": f"{utilization_aggregate:.6f}",
+        "expected_wait_time_aggregate": f"{expected_wait_time_aggregate:.6f}",
         "ev_aggregate": f"{ev_aggregate:.6f}",
         "station_aggregate": f"{station_aggregate:.6f}",
         "overall_score": f"{overall_score:.6f}",
@@ -301,6 +317,10 @@ def run_trial(
     score_seconds = time.perf_counter() - score_start
     print(
         f"  Scoring complete ({score_seconds:.2f}s) - "
+        f"Missed deadline: {score_values['missed_deadline_aggregate']:.6f}, "
+        f"EV wait: {score_values['ev_wait_time_aggregate']:.6f}, "
+        f"Utilization: {score_values['utilization_aggregate']:.6f}, "
+        f"Expected wait: {score_values['expected_wait_time_aggregate']:.6f}, "
         f"EV: {score_values['ev_aggregate']:.6f}, "
         f"Station: {score_values['station_aggregate']:.6f}, "
         f"Overall: {score_values['overall_score']:.6f}"
@@ -314,6 +334,10 @@ def run_trial(
         simulation_seconds=simulation_seconds,
         analysis_seconds=analysis_seconds,
         score_seconds=score_seconds,
+        missed_deadline_aggregate=score_values["missed_deadline_aggregate"],
+        ev_wait_time_aggregate=score_values["ev_wait_time_aggregate"],
+        utilization_aggregate=score_values["utilization_aggregate"],
+        expected_wait_time_aggregate=score_values["expected_wait_time_aggregate"],
         ev_aggregate=score_values["ev_aggregate"],
         station_aggregate=score_values["station_aggregate"],
         overall_score=score_values["overall_score"],
@@ -338,7 +362,7 @@ def main() -> None:
     session_env = {
         "ENGINE_SEED": str(args.seed),
         "SIMULATION_START_TIME_MS": "86400000",   # Start monday 00:00 (ms)
-        "SIMULATION_END_TIME_MS": "108000000",    # End at tuesday 00:00 (ms) 259200000
+        "SIMULATION_END_TIME_MS": "259200000",    # End at tuesday 00:00 (ms) 108000000(6hours) 
     }
 
     all_weights = build_grid(args.points_per_axis)
