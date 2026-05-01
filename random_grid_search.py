@@ -220,12 +220,12 @@ def run_scoring(run_id: str, output_root: Path) -> dict[str, float]:
         output_root=output_root,
     )
     return {
-        "missed_deadline_score": sim_score.ev_scores.missed_deadline_aggregate,
-        "ev_wait_time_score": sim_score.ev_scores.ev_wait_time_aggregate,
-        "utilization_score": sim_score.station_scores.utilization_aggregate,
-        "expected_wait_time_score": sim_score.station_scores.expected_wait_time_aggregate,
-        "ev_score": sim_score.ev_scores.weighted_aggregate,
-        "station_score": sim_score.station_scores.weighted_aggregate,
+        "missed_deadline_aggregate": sim_score.ev_scores.missed_deadline_aggregate,
+        "ev_wait_time_aggregate": sim_score.ev_scores.ev_wait_time_aggregate,
+        "utilization_aggregate": sim_score.station_scores.utilization_aggregate,
+        "expected_wait_time_aggregate": sim_score.station_scores.expected_wait_time_aggregate,
+        "ev_aggregate": sim_score.ev_scores.weighted_aggregate,
+        "station_aggregate": sim_score.station_scores.weighted_aggregate,
         "overall_score": sim_score.overall_aggregate,
     }
 
@@ -269,12 +269,12 @@ def build_result_row(
         "simulation_seconds": f"{simulation_seconds:.4f}",
         "analysis_seconds": f"{analysis_seconds:.4f}",
         "score_seconds": f"{score_seconds:.4f}",
-        "missed_deadline_score": f"{missed_deadline_aggregate:.6f}",
-        "ev_wait_time_score": f"{ev_wait_time_aggregate:.6f}",
-        "utilization_score": f"{utilization_aggregate:.6f}",
-        "expected_wait_time_score": f"{expected_wait_time_aggregate:.6f}",
-        "ev_score": f"{ev_aggregate:.6f}",
-        "station_score": f"{station_aggregate:.6f}",
+        "missed_deadline_aggregate": f"{missed_deadline_aggregate:.6f}",
+        "ev_wait_time_aggregate": f"{ev_wait_time_aggregate:.6f}",
+        "utilization_aggregate": f"{utilization_aggregate:.6f}",
+        "expected_wait_time_aggregate": f"{expected_wait_time_aggregate:.6f}",
+        "ev_aggregate": f"{ev_aggregate:.6f}",
+        "station_aggregate": f"{station_aggregate:.6f}",
         "overall_score": f"{overall_score:.6f}",
         "price_sensitivity": f"{weights['price_sensitivity']:.8f}",
         "path_deviation": f"{weights['path_deviation']:.8f}",
@@ -317,12 +317,12 @@ def run_trial(
     score_seconds = time.perf_counter() - score_start
     print(
         f"  Scoring complete ({score_seconds:.2f}s) - "
-        f"Missed deadline: {score_values['missed_deadline_score']:.6f}, "
-        f"EV wait: {score_values['ev_wait_time_score']:.6f}, "
-        f"Utilization: {score_values['utilization_score']:.6f}, "
-        f"Expected wait: {score_values['expected_wait_time_score']:.6f}, "
-        f"EV: {score_values['ev_score']:.6f}, "
-        f"Station: {score_values['station_score']:.6f}, "
+        f"Missed deadline: {score_values['missed_deadline_aggregate']:.6f}, "
+        f"EV wait: {score_values['ev_wait_time_aggregate']:.6f}, "
+        f"Utilization: {score_values['utilization_aggregate']:.6f}, "
+        f"Expected wait: {score_values['expected_wait_time_aggregate']:.6f}, "
+        f"EV: {score_values['ev_aggregate']:.6f}, "
+        f"Station: {score_values['station_aggregate']:.6f}, "
         f"Overall: {score_values['overall_score']:.6f}"
     )
 
@@ -334,12 +334,12 @@ def run_trial(
         simulation_seconds=simulation_seconds,
         analysis_seconds=analysis_seconds,
         score_seconds=score_seconds,
-        missed_deadline_aggregate=score_values["missed_deadline_score"],
-        ev_wait_time_aggregate=score_values["ev_wait_time_score"],
-        utilization_aggregate=score_values["utilization_score"],
-        expected_wait_time_aggregate=score_values["expected_wait_time_score"],
-        ev_aggregate=score_values["ev_score"],
-        station_aggregate=score_values["station_score"],
+        missed_deadline_aggregate=score_values["missed_deadline_aggregate"],
+        ev_wait_time_aggregate=score_values["ev_wait_time_aggregate"],
+        utilization_aggregate=score_values["utilization_aggregate"],
+        expected_wait_time_aggregate=score_values["expected_wait_time_aggregate"],
+        ev_aggregate=score_values["ev_aggregate"],
+        station_aggregate=score_values["station_aggregate"],
         overall_score=score_values["overall_score"],
     )
 
@@ -362,7 +362,7 @@ def main() -> None:
     session_env = {
         "ENGINE_SEED": str(args.seed),
         "SIMULATION_START_TIME_MS": "86400000",   # Start monday 00:00 (ms)
-        "SIMULATION_END_TIME_MS": "259200000",    # End at tuesday 00:00 (ms) 108000000(6hours) 
+        "SIMULATION_END_TIME_MS": "108000000",    # End at tuesday 00:00 (ms) 259200000(6hours) 
     }
 
     all_weights = build_grid(args.points_per_axis)
