@@ -372,7 +372,7 @@ def main() -> None:
     session_env = {
         "ENGINE_SEED": str(args.seed),
         "SIMULATION_START_TIME_MS": "86400000",   # Start monday 00:00 (ms)
-        "SIMULATION_END_TIME_MS": "96400000",    # End at tuesday 00:00 (ms) 259200000(6hours) 
+        "SIMULATION_END_TIME_MS": "259200000",    # End at tuesday 00:00 (ms) 259200000(6hours) 
     }
 
     all_weights = build_grid(args.points_per_axis)
