@@ -47,52 +47,131 @@ METRIC_WEIGHTS: dict[str, int] = {
 }
 
 
-def _wait_score(x: float) -> float:
-    return math.exp(-((x / 45) ** 2))
+def bucket_score_expr(col: str, buckets: list[tuple[float, int]]) -> pl.Expr:
+    """
+    Builds a Polars expression that computes the bucket score for one column,
+    grouped by simtime_ms. Returns a float per group.
+    """
+    total_weight = sum(w for _, w in buckets)
+
+    # Build a weighted-penalty expression using pl.when/then chaining.
+    # Each row gets the weight of whichever bucket it falls into.
+    previous = float("-inf")
+    weight_expr = pl.lit(None, dtype=pl.Float64)
+    for upper, w in buckets:
+        if upper == 0:
+            cond = pl.col(col) == 0.0
+        elif math.isinf(upper):
+            cond = pl.col(col) > previous
+        else:
+            cond = (pl.col(col) > previous) & (pl.col(col) <= upper)
+        weight_expr = pl.when(cond).then(pl.lit(float(w))).otherwise(weight_expr)
+        previous = upper
+
+    # score = mean(row_weight) / total_weight  (nulls are dropped by mean)
+    return (weight_expr.mean() / total_weight).alias(f"{col}_score")
 
 
-def count_buckets(values: list[float | None], buckets: list[tuple[float, int]]) -> list[int]:
-    counts = [0] * len(buckets)
-    for value in values:
-        if value is None:
-            continue
-        previous = float("-inf")
-        for i, (upper, _) in enumerate(buckets):
-            if upper == 0:
-                if value == 0.0:
-                    counts[i] += 1
-                    break
-                previous = 0.0
-            elif previous < value <= upper:
-                counts[i] += 1
-                break
-            else:
-                previous = upper
-    return counts
+def wait_score_expr() -> pl.Expr:
+    """Gaussian decay: exp(-(x/45)^2), averaged per group."""
+    x = pl.col("wait_minutes")
+    return ((-((x / 45.0) ** 2)).exp()).mean().alias("ev_wait_time_score")
 
 
-def bucket_score(entries: list[int], buckets: list[tuple[float, int]]) -> float:
-    weights       = [w for _, w in buckets]
-    total_entries = sum(entries)
-    if total_entries == 0:
-        return 0.0
-    weighted_sum = sum(e * w for e, w in zip(entries, weights))
-    return weighted_sum / (total_entries * sum(weights))
+def missed_deadline_expr() -> list[pl.Expr]:
+    """Returns (proportion_missed, score = 1 - proportion) per group."""
+    total  = pl.len()
+    direct = pl.col("drive_directly").sum()
+    missed = pl.col("missed_deadline").sum()
+    not_direct = total - direct
+    proportion = pl.when(not_direct > 0).then(missed / not_direct).otherwise(0.0)
+    return [
+        proportion.alias("missed_proportion"),
+        (1.0 - proportion).alias("missed_deadline_score"),
+        total.alias("total_arrivals"),
+        direct.alias("direct_drive_arrivals"),
+        missed.alias("missed_deadlines"),
+    ]
 
 
-def compute_wait_time_score(wait_minutes: list[float]) -> float:
-    if not wait_minutes:
-        return 0.0
-    return sum(_wait_score(x) for x in wait_minutes) / len(wait_minutes)
+def compute_ev_scores(run_id: str, output_root: Path) -> EVScores:
+    base = output_root / run_id / "analysis"
 
+    arrivals = pl.read_parquet(base / "arrival_snapshots.parquet")
 
-def missed_deadline_score(total: int, direct: int, missed: int) -> tuple[float, float]:
-    """Returns (proportion_missed, score). Score = 1 - proportion."""
-    ev_not_directly = total - direct
-    if ev_not_directly <= 0:
-        return 0.0, 1.0
-    proportion = missed / ev_not_directly
-    return proportion, 1.0 - proportion
+    wait_time_df = pl.read_parquet(base / "waittime_snapshots.parquet")
+    
+    snapshot_interval_ms = (
+        wait_time_df.select("simtime_ms")
+        .unique()
+        .sort("simtime_ms")
+        .with_columns(pl.col("simtime_ms").diff().alias("diff"))["diff"]
+        .drop_nulls()
+        .min()
+    ) or 1
+
+    arrival_scores = (
+        arrivals
+        .with_columns([
+            ((pl.col("simtime_ms") // snapshot_interval_ms) * snapshot_interval_ms).alias("simtime_ms")
+        ])
+        .group_by("simtime_ms").agg([
+            bucket_score_expr("path_deviation_minutes", PATH_DEVIATION_BUCKETS),
+            bucket_score_expr("delta_arrival_minutes",  DELTA_ARRIVAL_BUCKETS),
+            *missed_deadline_expr(),
+        ])
+    )
+
+    wait_scores = wait_time_df.group_by("simtime_ms").agg([
+        wait_score_expr(),
+    ])
+
+    per_snapshot = (
+        arrival_scores
+        .join(wait_scores, on="simtime_ms", how="left")
+        .with_columns(pl.col("ev_wait_time_score").fill_null(1.0)) 
+        .sort("simtime_ms")
+        .rename({
+            "path_deviation_minutes_score": "path_deviation_score",
+            "delta_arrival_minutes_score": "delta_arrival_score",
+        })
+        .select([
+            "simtime_ms",
+            "path_deviation_score",
+            "delta_arrival_score",
+            "ev_wait_time_score",
+            "missed_deadline_score",
+            "missed_proportion",
+            "total_arrivals",
+            "direct_drive_arrivals",
+            "missed_deadlines",
+        ])
+    )
+
+    path_deviation_agg = per_snapshot["path_deviation_score"].mean() or 0.0
+    delta_arrival_agg = per_snapshot["delta_arrival_score"].mean() or 0.0
+    wait_time_agg = per_snapshot["ev_wait_time_score"].mean() or 0.0
+    missed_deadline_agg = per_snapshot["missed_deadline_score"].mean() or 0.0
+
+    weighted_aggregate = (
+        METRIC_WEIGHTS["path_deviation"] * path_deviation_agg
+        + METRIC_WEIGHTS["delta_arrival"] * delta_arrival_agg
+        + METRIC_WEIGHTS["ev_wait_time"] * wait_time_agg
+        + METRIC_WEIGHTS["missed_deadline"] * missed_deadline_agg
+    ) / sum(METRIC_WEIGHTS.values())
+
+    print(f"Arrival keys: {arrival_scores['simtime_ms'].head(5).to_list()}")
+    print(f"Wait keys: {wait_scores['simtime_ms'].head(5).to_list()}")
+    print(f"Joined Null Count: {per_snapshot['ev_wait_time_score'].null_count()}")
+
+    return EVScores(
+        per_snapshot=per_snapshot,
+        path_deviation_aggregate=path_deviation_agg,
+        delta_arrival_aggregate=delta_arrival_agg,
+        ev_wait_time_aggregate=wait_time_agg,
+        missed_deadline_aggregate=missed_deadline_agg,
+        weighted_aggregate=weighted_aggregate,
+    )
 
 
 @dataclass
@@ -111,13 +190,13 @@ class EVScores:
                 "path_deviation_minutes": {
                     "higher_is_better": False,
                     "bucket_labels":    PATH_DEVIATION_BUCKET_LABELS,
-                    "bucket_weights":   [w for _, w in PATH_DEVIATION_BUCKETS],
+                    "bucket_weights":   [weights for _, weights in PATH_DEVIATION_BUCKETS],
                     "aggregate_score":  round(self.path_deviation_aggregate, 6),
                 },
                 "delta_arrival_minutes": {
                     "higher_is_better": False,
                     "bucket_labels":    DELTA_ARRIVAL_BUCKET_LABELS,
-                    "bucket_weights":   [w for _, w in DELTA_ARRIVAL_BUCKETS],
+                    "bucket_weights":   [weights for _, weights in DELTA_ARRIVAL_BUCKETS],
                     "aggregate_score":  round(self.delta_arrival_aggregate, 6),
                 },
                 "ev_wait_time": {
@@ -132,93 +211,3 @@ class EVScores:
             "metric_weights":     METRIC_WEIGHTS,
             "weighted_aggregate": round(self.weighted_aggregate, 6),
         }
-
-
-def _score_tick(
-    arrival_tick: pl.DataFrame,
-    wait_tick: pl.DataFrame,
-) -> dict:
-    path_deviation_entries = count_buckets(
-        arrival_tick["path_deviation_minutes"].to_list(),
-        PATH_DEVIATION_BUCKETS,
-    )
-    delta_arrival_entries = count_buckets(
-        arrival_tick["delta_arrival_minutes"].to_list(),
-        DELTA_ARRIVAL_BUCKETS,
-    )
-
-    path_dev_score  = bucket_score(path_deviation_entries, PATH_DEVIATION_BUCKETS)
-    delta_arr_score = bucket_score(delta_arrival_entries, DELTA_ARRIVAL_BUCKETS)
-    ev_wait_score   = compute_wait_time_score(wait_tick["wait_minutes"].to_list())
-
-    total  = len(arrival_tick)
-    direct = int(arrival_tick["drive_directly"].sum())
-    missed = int(arrival_tick["missed_deadline"].sum())
-    proportion, deadline_score = missed_deadline_score(total, direct, missed)
-
-    return {
-        "path_deviation_entries": path_deviation_entries,
-        "delta_arrival_entries":  delta_arrival_entries,
-        "path_deviation_score":   path_dev_score,
-        "delta_arrival_score":    delta_arr_score,
-        "ev_wait_time_score":     ev_wait_score,
-        "missed_deadline_score":  deadline_score,
-        "missed_proportion":      proportion,
-        "total_arrivals":         total,
-        "direct_drive_arrivals":  direct,
-        "missed_deadlines":       missed,
-    }
-
-
-def compute_ev_scores(run_id: str, output_root: Path) -> EVScores:
-    base = output_root / run_id / "analysis"
-
-    arrivals     = pl.read_parquet(base / "arrival_snapshots.parquet")
-    wait_time_df = pl.read_parquet(base / "waittime_snapshots.parquet")
-
-    snapshots = (
-        arrivals.select("simtime_ms").unique().sort("simtime_ms")["simtime_ms"].to_list()
-    )
-
-    rows = []
-    for snapshot in snapshots:
-        arrival_tick = arrivals.filter(pl.col("simtime_ms") == snapshot)
-        wait_tick    = wait_time_df.filter(pl.col("simtime_ms") == snapshot)
-        row          = _score_tick(arrival_tick, wait_tick)
-        row["simtime_ms"] = snapshot
-        rows.append(row)
-
-    per_snapshot = pl.DataFrame(rows).select([
-        "simtime_ms",
-        "path_deviation_score",
-        "delta_arrival_score",
-        "ev_wait_time_score",
-        "missed_deadline_score",
-        "missed_proportion",
-        "total_arrivals",
-        "direct_drive_arrivals",
-        "missed_deadlines",
-        "path_deviation_entries",
-        "delta_arrival_entries",
-    ])
-
-    path_dev_agg   = per_snapshot["path_deviation_score"].mean()
-    delta_arr_agg  = per_snapshot["delta_arrival_score"].mean()
-    wait_time_agg  = per_snapshot["ev_wait_time_score"].mean()
-    deadline_agg   = per_snapshot["missed_deadline_score"].mean()
-
-    weighted_aggregate = (
-        METRIC_WEIGHTS["path_deviation"]   * path_dev_agg
-        + METRIC_WEIGHTS["delta_arrival"]  * delta_arr_agg
-        + METRIC_WEIGHTS["ev_wait_time"]   * wait_time_agg
-        + METRIC_WEIGHTS["missed_deadline"] * deadline_agg
-    ) / sum(METRIC_WEIGHTS.values())
-
-    return EVScores(
-        per_snapshot=per_snapshot,
-        path_deviation_aggregate=path_dev_agg,
-        delta_arrival_aggregate=delta_arr_agg,
-        ev_wait_time_aggregate=wait_time_agg,
-        missed_deadline_aggregate=deadline_agg,
-        weighted_aggregate=weighted_aggregate,
-    )

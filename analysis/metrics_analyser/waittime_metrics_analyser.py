@@ -7,8 +7,21 @@ import polars as pl
 from init.loader import WEEKDAY_NAMES, MS_PER_DAY, SIMULATION_START_DOW
 
 OUTPUT_ROOT = Path("runs")
-
 PERCENTILES = [0.25, 0.50, 0.75, 0.90, 0.95, 0.99]
+
+
+def _infer_snapshot_interval(station_parquet_path: Path) -> int:
+    """Infers the snapshot interval in ms from the station snapshots."""
+    df = pl.read_parquet(station_parquet_path)
+    return (
+        df.select("simtime_ms")
+        .unique()
+        .sort("simtime_ms")
+        .with_columns(pl.col("simtime_ms").diff().alias("diff"))
+        ["diff"]
+        .drop_nulls()
+        .min()
+    )
 
 
 def analyse_wait_time(parquet_path: Path, run_id: str, output_root: Path = OUTPUT_ROOT) -> None:
@@ -20,11 +33,17 @@ def analyse_wait_time(parquet_path: Path, run_id: str, output_root: Path = OUTPU
         raise ValueError(f"Expected column 'WaitTimeInQueue' not found. "
                          f"Available: {df.columns}")
 
+    station_parquet = output_root / run_id / "analysis" / "station_snapshots.parquet"
+    snapshot_interval_ms = _infer_snapshot_interval(station_parquet)
+
     snapshot_df = (
         df.with_columns([
             (pl.col("WaitTimeInQueue") / 60_000).alias("wait_minutes"),
             (pl.col("StartChargingTime") // MS_PER_DAY).cast(pl.Int32).alias("day"),
-            (pl.col("StartChargingTime") % MS_PER_DAY).cast(pl.Int64).alias("simtime_ms"),
+            (
+                (pl.col("StartChargingTime") % MS_PER_DAY // snapshot_interval_ms)
+                * snapshot_interval_ms
+            ).cast(pl.Int64).alias("simtime_ms"),
         ])
         .with_columns([
             ((pl.col("day") + SIMULATION_START_DOW) % 7)
