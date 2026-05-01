@@ -167,6 +167,8 @@ def compute_ev_scores(run_id: str, output_root: Path) -> EVScores:
         ])
     )
 
+    quantile_cols = [f"wait_minutes_{name}" for name in PERCENTILE_NAMES]
+
     per_snapshot = (
         arrival_scores
         .join(wait_scores, on="simtime_ms", how="left")
@@ -186,6 +188,7 @@ def compute_ev_scores(run_id: str, output_root: Path) -> EVScores:
             "total_arrivals",
             "direct_drive_arrivals",
             "missed_deadlines",
+            *quantile_cols,
         ])
     )
 

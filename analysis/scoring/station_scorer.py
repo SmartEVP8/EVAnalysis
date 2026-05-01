@@ -70,18 +70,19 @@ def compute_station_scores(run_id: str, output_root: Path) -> StationScores:
             f"Expected column '{wait_time_column}' not found in {snapshots_path}"
         )
 
-    snapshots = snapshots.with_columns(
-        wait_score_expr(wait_time_column).alias("wait_score")
-    )
+    snapshots = snapshots.with_columns([
+        wait_score_expr(wait_time_column).alias("wait_score"),
+        utilization_score_expr().alias("norm_utilization")
+    ])
 
 
     per_bucket = (
         snapshots
         .group_by("simtime_ms")
         .agg([
-            utilization_score_expr().mean().alias("utilization_score"),
+            pl.col("norm_utilization").mean().alias("utilization_score"),
             *[
-                utilization_score_expr().quantile(percentile).alias(f"utilization_{name}")
+                pl.col("norm_utilization").quantile(percentile).alias(f"utilization_{name}")
                 for percentile, name in zip(PERCENTILES, PERCENTILE_NAMES)
             ],
 
