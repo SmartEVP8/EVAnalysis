@@ -1,60 +1,60 @@
 """
-Module for analyzing EV wait time in queue metrics.
+Module for analysing EV wait-time-in-queue metrics.
+
+Reads raw WaitTimeInQueueMetric data and writes:
+  - waittime_snapshots.parquet : per-EV enriched log snapped to the station snapshot time grid
+  - waittime_percentiles.parquet : per-time-slot wait-time percentiles and EV counts
 """
 
 from pathlib import Path
+
 import polars as pl
-from init.loader import WEEKDAY_NAMES, MS_PER_DAY, SIMULATION_START_DOW
 
-OUTPUT_ROOT = Path("runs")
-PERCENTILES = [0.25, 0.50, 0.75, 0.90, 0.95, 0.99]
-
-
-def _infer_snapshot_interval(station_parquet_path: Path) -> int:
-    """Infers the snapshot interval in ms from the station snapshots."""
-    df = pl.read_parquet(station_parquet_path)
-    return (
-        df.select("simtime_ms")
-        .unique()
-        .sort("simtime_ms")
-        .with_columns(pl.col("simtime_ms").diff().alias("diff"))
-        ["diff"]
-        .drop_nulls()
-        .min()
-    )
+from helpers.loader import add_time_columns, MS_PER_DAY
+from helpers.constants import OUTPUT_ROOT, PERCENTILES
+from helpers.io_helpers import save_parquet, infer_snapshot_interval_ms
 
 
-def analyse_wait_time(parquet_path: Path, run_id: str, output_root: Path = OUTPUT_ROOT) -> None:
+def analyse_wait_time(
+    parquet_path: Path,
+    run_id: str,
+    output_root: Path = OUTPUT_ROOT,
+) -> None:
+    """
+    Analyses wait-time-in-queue data for a single simulation run.
+
+    StartChargingTime is used as the reference clock for temporal grouping.
+    Each record is snapped to the nearest station-snapshot interval so that
+    downstream joins with station data are aligned on the same time grid.
+    """
     print(f"\n[WaitTime] Analysing {parquet_path.name}...")
 
     df = pl.read_parquet(parquet_path)
 
     if "WaitTimeInQueue" not in df.columns:
-        raise ValueError(f"Expected column 'WaitTimeInQueue' not found. "
-                         f"Available: {df.columns}")
+        raise ValueError(
+            f"Expected column 'WaitTimeInQueue' not found. "
+            f"Available columns: {df.columns}"
+        )
 
-    station_parquet = output_root / run_id / "analysis" / "station_snapshots.parquet"
-    snapshot_interval_ms = _infer_snapshot_interval(station_parquet)
+    station_snapshots_path = output_root / run_id / "analysis" / "station_snapshots.parquet"
+    snapshot_interval_ms = infer_snapshot_interval_ms(station_snapshots_path)
+
+    df = add_time_columns(df, "StartChargingTime")
 
     snapshot_df = (
-        df.with_columns([
+        df
+        .with_columns([
             (pl.col("WaitTimeInQueue") / 60_000).alias("wait_minutes"),
-            (pl.col("StartChargingTime") // MS_PER_DAY).cast(pl.Int32).alias("day"),
             (
-                (pl.col("StartChargingTime") % MS_PER_DAY // snapshot_interval_ms)
-                * snapshot_interval_ms
+                (pl.col("simtime_ms") // snapshot_interval_ms) * snapshot_interval_ms
             ).cast(pl.Int64).alias("simtime_ms"),
         ])
         .with_columns([
-            ((pl.col("day") + SIMULATION_START_DOW) % 7)
-              .map_elements(lambda x: WEEKDAY_NAMES[x], return_dtype=pl.Utf8)
-              .alias("weekday_name"),
-        ])
-        .with_columns([
             (
-                (pl.col("simtime_ms") // 1000 // 3600).cast(pl.Utf8).str.zfill(2)
+                (pl.col("simtime_ms") // 1_000 // 3_600).cast(pl.Utf8).str.zfill(2)
                 + pl.lit(":")
-                + ((pl.col("simtime_ms") // 1000 % 3600) // 60).cast(pl.Utf8).str.zfill(2)
+                + ((pl.col("simtime_ms") // 1_000 % 3_600) // 60).cast(pl.Utf8).str.zfill(2)
             ).alias("time_label"),
         ])
         .select([
@@ -67,16 +67,13 @@ def analyse_wait_time(parquet_path: Path, run_id: str, output_root: Path = OUTPU
     )
 
     out_analysis = output_root / run_id / "analysis"
-    out_analysis.mkdir(parents=True, exist_ok=True)
-
-    snapshot_df.write_parquet(out_analysis / "waittime_snapshots.parquet")
-    print(f"  Saved waittime_snapshots.parquet ({len(snapshot_df)} rows)")
+    save_parquet(snapshot_df, out_analysis / "waittime_snapshots.parquet", "[WaitTime]")
 
     percentile_df = (
         snapshot_df
         .group_by(["weekday_name", "simtime_ms", "time_label"])
         .agg(
-            [pl.col("wait_minutes").quantile(q).alias(f"wait_p{int(q*100)}")
+            [pl.col("wait_minutes").quantile(q).alias(f"wait_p{int(q * 100)}")
              for q in PERCENTILES]
             + [pl.col("EVId").count().alias("ev_count")]
         )
@@ -84,7 +81,4 @@ def analyse_wait_time(parquet_path: Path, run_id: str, output_root: Path = OUTPU
     )
 
     out_percentiles = output_root / run_id / "percentiles" / "waittime"
-    out_percentiles.mkdir(parents=True, exist_ok=True)
-
-    percentile_df.write_parquet(out_percentiles / "waittime_percentiles.parquet")
-    print(f"  Saved waittime_percentiles.parquet ({len(percentile_df)} rows)")
+    save_parquet(percentile_df, out_percentiles / "waittime_percentiles.parquet", "[WaitTime]")

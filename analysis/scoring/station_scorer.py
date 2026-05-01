@@ -1,99 +1,114 @@
 """
-station_scorer.py
------------------
-Scores station-level simulation metrics per snapshot tick:
-  - utilization            (per-tick max-normalised, averaged across stations)
-  - expected_wait_time     (Gaussian decay on per-station expected wait, averaged)
+Scores station-level simulation metrics per snapshot bucket.
 
-Normalisation for utilization is per-tick: each station's utilization at tick T
-is divided by the maximum utilization observed across all stations at tick T.
+Per-bucket metrics
+utilization_score : mean normalised utilization across stations (relative to bucket max)
+expected_wait_score : mean Gaussian decay score for expected wait time
 
-The run-wide aggregate for each metric is the mean of its per-tick scores.
-The weighted_aggregate is the weighted mean of the two metric aggregates.
-
-Entry point:
-    scores = compute_station_scores(run_id, output_root)
+The run-wide aggregate for each metric is the mean of its per-bucket scores.
+weighted_aggregate is the weighted mean of the two metric aggregates.
 """
 
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass
 from pathlib import Path
+from helpers.constants import PERCENTILES
 
 import polars as pl
 
 
-PERCENTILES = ["p25", "p50", "p75", "p90", "p95", "p99"]
+PERCENTILE_NAMES:  list[str]   = ["p25", "p50", "p75", "p90", "p95", "p99"]
 
 METRIC_WEIGHTS: dict[str, int] = {
-    "utilization":         1,
-    "expected_wait_time":  3,
+    "utilization":        1,
+    "expected_wait_time": 3,
 }
 
-
-# ---------------------------------------------------------------------------
-# Scoring primitives
-# ---------------------------------------------------------------------------
-
-def _wait_score(x: float) -> float:
-    return math.exp(-((x / 45) ** 2))
+WAIT_DECAY_MINUTES: float = 45.0
 
 
-def _score_utilization_tick(tick_df: pl.DataFrame) -> float:
+def wait_score_expr(wait_col: str) -> pl.Expr:
     """
-    Score utilization for a single tick.
+    Gaussian decay score for wait time: exp(-(x/WAIT_DECAY_MINUTES)²), averaged per group.
 
-    tick_df must have a 'utilization' column (one row per station).
-    Each station's utilization is divided by the tick's max utilization,
-    then all station scores are averaged.
+    A wait of 0 minutes scores 1.0; longer waits score progressively lower,
+    with 45 minutes scoring roughly 0.37, and waits over 90 minutes scoring near 0.
 
-    Returns 0.0 if all stations have zero utilization at this tick.
+    exp( -(45 / 45)² ) = exp(-1) ≈ 0.3679
+    exp( -(90 / 45)² ) = exp(-4) ≈ 0.0183
     """
-    values = tick_df["utilization"].drop_nulls().to_list()
-    if not values:
-        return 0.0
-
-    tick_max = max(values)
-    if tick_max == 0.0:
-        return 0.0
-
-    return sum(v / tick_max for v in values) / len(values)
+    x = pl.col(wait_col)
+    return (-((x / WAIT_DECAY_MINUTES) ** 2)).exp()
 
 
-def _score_expected_wait_tick(tick_df: pl.DataFrame) -> float:
+def compute_station_scores(run_id: str, output_root: Path) -> StationScores:
     """
-    Score expected wait time for a single tick.
+    Computes per-bucket and aggregate station scores for a simulation run.
 
-    tick_df must have a 'station_expected_wait_time' column (one row per station,
-    value in minutes). Applies Gaussian decay to each station's expected wait,
-    then averages across stations.
-
-    Returns 0.0 if no data at this tick.
-
-    NOTE: 'station_expected_wait_time' column is not yet present in
-    station_snapshots.parquet — it will be added to StationSnapshotMetric soon.
+    Reads station_snapshots.parquet, computes utilization and wait-time scores
+    per bucket, and returns a StationScores dataclass.
     """
-    values = tick_df["station_expected_wait_time"].drop_nulls().to_list()
-    if not values:
-        return 0.0
-    return sum(_wait_score(x) for x in values) / len(values)
+    snapshots_path = output_root / run_id / "analysis" / "station_snapshots.parquet"
+    snapshots = pl.read_parquet(snapshots_path)
+
+    wait_col = "expected_wait_minutes"
+    if wait_col not in snapshots.columns:
+        raise ValueError(
+            f"Expected column '{wait_col}' not found in {snapshots_path}"
+        )
+
+    snapshots = snapshots.with_columns(
+        wait_score_expr(wait_col).alias("wait_score")
+    )
+
+    per_bucket = (
+        snapshots
+        .group_by("simtime_ms")
+        .agg([
+            (
+                pl.when(pl.col("utilization").max() > 0)
+                  .then(pl.col("utilization") / pl.col("utilization").max())
+                  .otherwise(0.0)
+            ).mean().alias("utilization_score"),
+
+            pl.col("wait_score").mean().alias("expected_wait_score"),
+
+            *[
+                pl.col("wait_score").quantile(p).alias(f"wait_score_{name}")
+                for p, name in zip(PERCENTILES, PERCENTILE_NAMES)
+            ],
+        ])
+        .fill_nan(0.0)
+        .sort("simtime_ms")
+    )
+
+    utilization_aggregate: float = per_bucket["utilization_score"].mean()
+    expected_wait_aggregate: float = per_bucket["expected_wait_score"].mean()
+
+    total_weight: int = sum(METRIC_WEIGHTS.values())
+    weighted_aggregate: float = (
+        METRIC_WEIGHTS["utilization"] * utilization_aggregate
+        + METRIC_WEIGHTS["expected_wait_time"] * expected_wait_aggregate
+    ) / total_weight
+
+    return StationScores(
+        per_bucket=per_bucket,
+        utilization_aggregate=utilization_aggregate,
+        expected_wait_time_aggregate=expected_wait_aggregate,
+        weighted_aggregate=weighted_aggregate,
+        number_of_stations=snapshots["StationId"].n_unique(),
+    )
 
 
-# ---------------------------------------------------------------------------
-# Result dataclass
-# ---------------------------------------------------------------------------
 
 @dataclass
 class StationScores:
-    # Per-tick detail — one row per simtime_ms
-    per_tick: pl.DataFrame
+    per_bucket: pl.DataFrame
 
-    # Run-wide aggregates (mean across ticks)
     utilization_aggregate: float
     expected_wait_time_aggregate: float
     weighted_aggregate: float
-
     number_of_stations: int
 
     def to_dict(self) -> dict:
@@ -101,79 +116,14 @@ class StationScores:
             "per_metric": {
                 "utilization": {
                     "higher_is_better": True,
-                    "aggregate_score":  round(self.utilization_aggregate, 6),
+                    "aggregate_score": round(self.utilization_aggregate, 6),
                 },
                 "expected_wait_time": {
-                    "higher_is_better": False,
-                    "aggregate_score":  round(self.expected_wait_time_aggregate, 6),
+                    "higher_is_better": True,
+                    "aggregate_score": round(self.expected_wait_time_aggregate, 6),
                 },
             },
             "number_of_stations": self.number_of_stations,
-            "metric_weights":     METRIC_WEIGHTS,
+            "metric_weights": METRIC_WEIGHTS,
             "weighted_aggregate": round(self.weighted_aggregate, 6),
         }
-
-
-# ---------------------------------------------------------------------------
-# Main entry point
-# ---------------------------------------------------------------------------
-
-def compute_station_scores(run_id: str, output_root: Path) -> StationScores:
-    """
-    Reads station_snapshots.parquet and returns StationScores with per-tick
-    detail and run-wide aggregates.
-
-    Parquet consumed
-    analysis/station_snapshots.parquet
-        StationId, simtime_ms, utilization, station_expected_wait_time (minutes)
-
-    NOTE: station_expected_wait_time will be null for all rows until the column
-    is added to StationSnapshotMetric. The scorer handles this currently by
-    returning 0.0 for ticks where the column is entirely null.
-    """
-    path = output_root / run_id / "analysis" / "station_snapshots.parquet"
-    snapshots = pl.read_parquet(path)
-
-    if "station_expected_wait_time" not in snapshots.columns:
-        if "expected_wait_minutes" in snapshots.columns:
-            snapshots = snapshots.with_columns(
-                pl.col("expected_wait_minutes").alias("station_expected_wait_time")
-            )
-        else:
-            raise ValueError("Expected column 'station_expected_wait_time' not found")
-
-    ticks = (
-        snapshots.select("simtime_ms").unique().sort("simtime_ms")["simtime_ms"].to_list()
-    )
-    n_stations = snapshots["StationId"].n_unique()
-
-    rows = []
-    for tick in ticks:
-        tick_df = snapshots.filter(pl.col("simtime_ms") == tick)
-
-        util_score = _score_utilization_tick(tick_df)
-        wait_score = _score_expected_wait_tick(tick_df)
-
-        rows.append({
-            "simtime_ms":            tick,
-            "utilization_score":     util_score,
-            "expected_wait_score":   wait_score,
-        })
-
-    per_tick = pl.DataFrame(rows)
-
-    util_agg = per_tick["utilization_score"].mean()
-    wait_agg = per_tick["expected_wait_score"].mean()
-
-    weighted_aggregate = (
-        METRIC_WEIGHTS["utilization"] * util_agg
-        + METRIC_WEIGHTS["expected_wait_time"] * wait_agg
-    ) / sum(METRIC_WEIGHTS.values())
-
-    return StationScores(
-        per_tick=per_tick,
-        utilization_aggregate=util_agg,
-        expected_wait_time_aggregate=wait_agg,
-        weighted_aggregate=weighted_aggregate,
-        number_of_stations=n_stations,
-    )

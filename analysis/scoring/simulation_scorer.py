@@ -1,5 +1,4 @@
 """
-simulation_scorer.py
 Aggregates EV and station scores into a single simulation score and writes
 simulation_score.json.
 """
@@ -9,12 +8,12 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from helpers.constants import OUTPUT_ROOT
 from analysis.scoring.ev_scorer import EVScores, compute_ev_scores
 from analysis.scoring.station_scorer import StationScores, compute_station_scores
 
-
 GROUP_WEIGHTS: dict[str, int] = {
-    "ev":      1,
+    "ev": 1,
     "station": 1,
 }
 
@@ -26,15 +25,17 @@ class SimulationScore:
         source_path: str,
         ev_scores: EVScores,
         station_scores: StationScores,
-    ):
+    ) -> None:
         self.run_id = run_id
         self.source_path = source_path
         self.ev_scores = ev_scores
         self.station_scores = station_scores
-        self.overall_aggregate = (
+
+        total_weight: int = sum(GROUP_WEIGHTS.values())
+        self.overall_aggregate: float = (
             GROUP_WEIGHTS["ev"] * ev_scores.weighted_aggregate
             + GROUP_WEIGHTS["station"] * station_scores.weighted_aggregate
-        ) / sum(GROUP_WEIGHTS.values())
+        ) / total_weight
 
     def to_dict(self) -> dict:
         return {
@@ -50,15 +51,18 @@ class SimulationScore:
         output_path.parent.mkdir(parents=True, exist_ok=True)
         with output_path.open("w", encoding="utf-8") as f:
             json.dump(self.to_dict(), f, indent=2)
-        print(f"[simulation_scorer] Wrote {output_path}")
+        print(f"[SimulationScorer] Wrote {output_path}")
 
 
 def compute_simulation_score(
     run_id: str,
     source_path: str,
-    output_root: Path,
+    output_root: Path = OUTPUT_ROOT,
     output_path: Path | None = None,
 ) -> SimulationScore:
+    """
+    Computes the combined simulation score and persists it as JSON.
+    """
     if output_path is None:
         output_path = output_root / run_id / "simulation_score.json"
 
