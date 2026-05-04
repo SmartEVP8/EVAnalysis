@@ -396,9 +396,9 @@ def main() -> None:
 
     session_env = {
         "ENGINE_SEED": str(args.seed),
-        "SIMULATION_START_TIME_MS": "86400000",   # Start monday 00:00 (ms)
-        "SIMULATION_END_TIME_MS": "259200000",    # End at tuesday 00:00 (ms) 259200000(6hours) 
-        "DISABLE_FILE_LOGGING": "true"
+        "SIMULATION_START_TIME_MS": "111600000",   # Monday 07:00
+        "SIMULATION_END_TIME_MS": "144000000",    # Monday 16:00   # End at tuesday 00:00 (ms) 259200000(6hours) 
+        "DISABLE_FILE_LOGGING": "false"
     }
 
     all_weights = build_grid(args.points_per_axis)
