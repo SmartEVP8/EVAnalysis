@@ -38,17 +38,17 @@ DELTA_ARRIVAL_BUCKETS: list[tuple[float, int]] = [
     (10,           1),
     (15,           1),
     (30,           1),
-    (60,           1),
-    (float("inf"), 1),
+    (60,           2),
+    (float("inf"), 3),
 ]
 DELTA_ARRIVAL_BUCKET_LABELS: list[str] = ["0", "5", "10", "15", "30", "60", "60+"]
 
 PERCENTILE_NAMES:  list[str] = ["p25", "p50", "p75", "p90", "p95", "p99"]
 
-METRIC_WEIGHTS: dict[str, int] = {
-    "path_deviation":  1,
-    "delta_arrival":   1,
-    "ev_wait_time":    3,
+EV_METRIC_WEIGHTS = {
+    "path_deviation": 1,
+    "delta_arrival": 1,
+    "ev_wait_time": 3,
     "missed_deadline": 2,
 }
 
@@ -124,7 +124,7 @@ def compute_ev_scores(run_id: str, output_root: Path) -> EVScores:
     them onto a shared bucket grid, and returns an EVScores dataclass.
 
     Args:
-        run_id:      Simulation run identifier (e.g. 'Run_001').
+        run_id: Simulation run identifier (e.g. 'Run_001').
         output_root: Root directory containing all run output.
 
     Returns:
@@ -197,12 +197,12 @@ def compute_ev_scores(run_id: str, output_root: Path) -> EVScores:
     ev_wait_time_aggregate: float = per_snapshot["ev_wait_time_score"].mean()    or 0.0
     missed_deadline_aggregate: float = per_snapshot["missed_deadline_score"].mean() or 0.0
 
-    total_weight: int = sum(METRIC_WEIGHTS.values())
+    total_weight: int = sum(EV_METRIC_WEIGHTS.values())
     weighted_aggregate: float = (
-        METRIC_WEIGHTS["path_deviation"] * path_deviation_aggregate
-        + METRIC_WEIGHTS["delta_arrival"] * delta_arrival_aggregate
-        + METRIC_WEIGHTS["ev_wait_time"] * ev_wait_time_aggregate
-        + METRIC_WEIGHTS["missed_deadline"] * missed_deadline_aggregate
+        EV_METRIC_WEIGHTS["path_deviation"] * path_deviation_aggregate
+        + EV_METRIC_WEIGHTS["delta_arrival"] * delta_arrival_aggregate
+        + EV_METRIC_WEIGHTS["ev_wait_time"] * ev_wait_time_aggregate
+        + EV_METRIC_WEIGHTS["missed_deadline"] * missed_deadline_aggregate
     ) / total_weight
 
     return EVScores(
@@ -249,6 +249,6 @@ class EVScores:
                     "aggregate_score": round(self.missed_deadline_aggregate, 6),
                 },
             },
-            "metric_weights": METRIC_WEIGHTS,
+            "metric_weights": EV_METRIC_WEIGHTS,
             "weighted_aggregate": round(self.weighted_aggregate, 6),
         }

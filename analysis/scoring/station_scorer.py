@@ -20,8 +20,8 @@ import polars as pl
 
 PERCENTILE_NAMES:  list[str]   = ["p25", "p50", "p75", "p90", "p95", "p99"]
 
-METRIC_WEIGHTS: dict[str, int] = {
-    "utilization":        1,
+STATION_METRIC_WEIGHTS = {
+    "utilization": 1,
     "expected_wait_time": 3,
 }
 
@@ -99,10 +99,10 @@ def compute_station_scores(run_id: str, output_root: Path) -> StationScores:
     utilization_aggregate: float = per_bucket["utilization_score"].mean()
     expected_wait_aggregate: float = per_bucket["expected_wait_score"].mean()
 
-    total_weight: int = sum(METRIC_WEIGHTS.values())
+    total_weight: int = sum(STATION_METRIC_WEIGHTS.values())
     weighted_aggregate: float = (
-        METRIC_WEIGHTS["utilization"] * utilization_aggregate
-        + METRIC_WEIGHTS["expected_wait_time"] * expected_wait_aggregate
+        STATION_METRIC_WEIGHTS["utilization"] * utilization_aggregate
+        + STATION_METRIC_WEIGHTS["expected_wait_time"] * expected_wait_aggregate
     ) / total_weight
 
     return StationScores(
@@ -136,6 +136,6 @@ class StationScores:
                 },
             },
             "number_of_stations": self.number_of_stations,
-            "metric_weights": METRIC_WEIGHTS,
+            "metric_weights": STATION_METRIC_WEIGHTS,
             "weighted_aggregate": round(self.weighted_aggregate, 6),
         }
