@@ -38,8 +38,8 @@ DELTA_ARRIVAL_BUCKETS: list[tuple[float, int]] = [
     (10,           1),
     (15,           1),
     (30,           1),
-    (60,           1),
-    (float("inf"), 1),
+    (60,           2),
+    (float("inf"), 3),
 ]
 DELTA_ARRIVAL_BUCKET_LABELS: list[str] = ["0", "5", "10", "15", "30", "60", "60+"]
 
