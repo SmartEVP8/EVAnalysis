@@ -4,11 +4,9 @@ import argparse
 import csv
 import itertools
 import os
-import random
 import subprocess
 import time
 import tomllib
-from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -16,16 +14,22 @@ from typing import Any
 import polars as pl
 
 from pipeline.run_pipeline import PipelineRunner
+from analysis.scoring.simulation_scorer import compute_simulation_score
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 DEFAULT_HEADLESS_PROJECT = PROJECT_ROOT.parent / "SmartEV" / "Headless" / "Headless.csproj"
-DEFAULT_RANDOM_RESULTS_PATH = PROJECT_ROOT / "runs" / "random_search_results.csv"
-DEFAULT_GRID_RESULTS_PATH   = PROJECT_ROOT / "runs" / "grid_search_results.csv"
+DEFAULT_GRID_RESULTS_PATH = PROJECT_ROOT / "runs" / "grid_search_results.csv"
 
 ENV_VAR_BY_WEIGHT = {
     "price_sensitivity": "COST_WEIGHT_PRICE_SENSITIVITY",
     "path_deviation": "COST_WEIGHT_PATH_DEVIATION",
     "expected_wait_time": "COST_WEIGHT_EXPECTED_WAIT_TIME",
+}
+
+WEIGHT_RANGES = {
+    "price_sensitivity": (0, 10),
+    "path_deviation": (0, 100),
+    "expected_wait_time": (0, 100),
 }
 
 RESULT_FIELDNAMES = [
@@ -36,6 +40,14 @@ RESULT_FIELDNAMES = [
     "error",
     "simulation_seconds",
     "analysis_seconds",
+    "score_seconds",
+    "missed_deadline_aggregate",
+    "ev_wait_time_aggregate",
+    "utilization_aggregate",
+    "expected_wait_time_aggregate",
+    "ev_aggregate",
+    "station_aggregate",
+    "overall_score",
     "price_sensitivity",
     "path_deviation",
     "expected_wait_time",
@@ -45,20 +57,14 @@ METRIC_FILENAMES = [
     "StationSnapshotMetric.parquet",
     "ChargerSnapshotMetric.parquet",
     "ArrivalAtDestinationMetric.parquet",
+    "WaitTimeInQueueMetric.parquet",
 ]
 
 
-@dataclass(frozen=True)
-class WeightRanges:
-    price_sensitivity: tuple[float, float]
-    path_deviation: tuple[float, float]
-    expected_wait_time: tuple[float, float]
-
-
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Weight search over SmartEV cost weights.")
+    parser = argparse.ArgumentParser(description="Grid search over SmartEV cost weights.")
 
-    parser.add_argument("--iterations", type=int, default=10, help="Number of random trials to run.")
+    parser.add_argument("--iterations", type=int, default=10, help="Number of trials to run.")
     parser.add_argument(
         "--headless-project",
         type=Path,
@@ -76,29 +82,29 @@ def parse_args() -> argparse.Namespace:
         "--results-file",
         type=Path,
         default=None,
-        help="Optional CSV path. If omitted, defaults to random/grid results file based on --strategy.",
+        help="Optional CSV path. If omitted, defaults to grid results file.",
     )
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--price-sensitivity-range", type=float, nargs=2, default=(0.0, 1.0))
-    parser.add_argument("--path-deviation-range", type=float, nargs=2, default=(0.0, 1.0))
-    parser.add_argument("--expected-wait-time-range", type=float, nargs=2, default=(0.0, 1.0))
-
-    parser.add_argument(
-        "--strategy",
-        "--s",
-        dest="strategy",
-        type=str,
-        default="random",
-        choices=["random", "grid"],
-        help="Search strategy to use (default: random).",
-    )
 
     parser.add_argument(
         "--points-per-axis",
         type=int,
-        default=5,
-        help="Grid search: number of evenly-spaced values per weight axis (e.g. 5 → [0, 0.25, 0.5, 0.75, 1]). "
-             "Total trials = points_per_axis ** 5.",
+        default=4,
+        help="Number of evenly-spaced values per weight axis (e.g. 5 → [0, 0.25, 0.5, 0.75, 1]). "
+             "Total trials = points_per_axis ** 3.",
+    )
+    parser.add_argument(
+        "--session-dir",
+        type=Path,
+        default=None,
+        help="Path to an existing session directory to resume appending to.",
+    )
+
+    parser.add_argument(
+        "--start-iteration",
+        type=int,
+        default=1,
+        help="Iteration number to start/resume from.",
     )
 
     return parser.parse_args()
@@ -131,50 +137,26 @@ def resolve_path(path: Path, *, must_be: str = "file") -> Path:
     return path
 
 
-def validate_range(name: str, bounds: tuple[float, float]) -> tuple[float, float]:
-    low, high = bounds
-    if low > high:
-        raise ValueError(f"Invalid range for {name}: min ({low}) > max ({high})")
-    return low, high
-
-
-def build_ranges(args: argparse.Namespace) -> WeightRanges:
-    return WeightRanges(
-        price_sensitivity=validate_range("price_sensitivity", tuple(args.price_sensitivity_range)),
-        path_deviation=validate_range("path_deviation", tuple(args.path_deviation_range)),
-        expected_wait_time=validate_range("expected_wait_time", tuple(args.expected_wait_time_range)),
-    )
-
-
-def sample_weights(rng: random.Random, ranges: WeightRanges) -> dict[str, float]:
-    return {
-        "price_sensitivity": rng.uniform(*ranges.price_sensitivity),
-        "path_deviation": rng.uniform(*ranges.path_deviation),
-        "expected_wait_time": rng.uniform(*ranges.expected_wait_time),
-    }
-
-
-def random_search_weights(args: argparse.Namespace, ranges: WeightRanges) -> list[dict[str, float]]:
-    rng = random.Random()
-    return [sample_weights(rng, ranges) for _ in range(args.iterations)]
-
-
 def build_grid(points_per_axis: int) -> list[dict[str, float]]:
     if points_per_axis < 2:
         raise ValueError("--points-per-axis must be >= 2")
 
-    axis_values = [i / (points_per_axis - 1) for i in range(points_per_axis)]
     keys = list(ENV_VAR_BY_WEIGHT)
+    axes = []
+    for key in keys:
+        lo, hi = WEIGHT_RANGES[key]
+        step = (hi - lo) / (points_per_axis - 1)
+        axes.append([lo + i * step for i in range(points_per_axis)])
 
     return [
         dict(zip(keys, combo))
-        for combo in itertools.product(axis_values, repeat=len(keys))
+        for combo in itertools.product(*axes)
     ]
 
 
-def create_search_session_dir(strategy: str) -> Path:
+def create_search_session_dir() -> Path:
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    session_dir = PROJECT_ROOT / "runs" / "search_sessions" / f"{strategy}_{timestamp}"
+    session_dir = PROJECT_ROOT / "runs" / "search_sessions" / f"grid_{timestamp}"
     session_dir.mkdir(parents=True, exist_ok=False)
     return session_dir
 
@@ -198,12 +180,15 @@ def run_headless_once(
     env.update(session_env)
     env.update({ENV_VAR_BY_WEIGHT[name]: f"{value:.8f}" for name, value in weights.items()})
 
-    subprocess.run(
+    result = subprocess.run(
         ["dotnet", "run", "--project", str(headless_project), "-c", build_config],
-        check=True,
+        check=False,
         cwd=str(PROJECT_ROOT.parent),
         env=env,
     )
+
+    if result.returncode not in [0, 139]:
+        raise RuntimeError(f"dotnet run failed with exit status {result.returncode}")
 
     all_run_dirs = [path for path in perkuet_root.iterdir() if path.is_dir()]
 
@@ -253,6 +238,24 @@ def run_analysis(run_dir: Path, output_root: Path) -> None:
     PipelineRunner(run_dir, output_root=output_root).run_all()
 
 
+def run_scoring(run_id: str, output_root: Path) -> dict[str, float]:
+    """Compute simulation score and return component and aggregate scores."""
+    sim_score = compute_simulation_score(
+        run_id=run_id,
+        source_path=str(output_root),
+        output_root=output_root,
+    )
+    return {
+        "missed_deadline_aggregate": sim_score.ev_scores.missed_deadline_aggregate,
+        "ev_wait_time_aggregate": sim_score.ev_scores.ev_wait_time_aggregate,
+        "utilization_aggregate": sim_score.station_scores.utilization_aggregate,
+        "expected_wait_time_aggregate": sim_score.station_scores.expected_wait_time_aggregate,
+        "ev_aggregate": sim_score.ev_scores.weighted_aggregate,
+        "station_aggregate": sim_score.station_scores.weighted_aggregate,
+        "overall_score": sim_score.overall_aggregate,
+    }
+
+
 def append_result_row(csv_path: Path, row: dict[str, Any]) -> None:
     csv_path.parent.mkdir(parents=True, exist_ok=True)
     write_header = not csv_path.exists()
@@ -274,6 +277,14 @@ def build_result_row(
     error: str = "",
     simulation_seconds: float = 0.0,
     analysis_seconds: float = 0.0,
+    score_seconds: float = 0.0,
+    missed_deadline_aggregate: float = 0.0,
+    ev_wait_time_aggregate: float = 0.0,
+    utilization_aggregate: float = 0.0,
+    expected_wait_time_aggregate: float = 0.0,
+    ev_aggregate: float = 0.0,
+    station_aggregate: float = 0.0,
+    overall_score: float = 0.0,
 ) -> dict[str, Any]:
     return {
         "iteration": iteration,
@@ -283,10 +294,16 @@ def build_result_row(
         "error": error,
         "simulation_seconds": f"{simulation_seconds:.4f}",
         "analysis_seconds": f"{analysis_seconds:.4f}",
+        "score_seconds": f"{score_seconds:.4f}",
+        "missed_deadline_aggregate": f"{missed_deadline_aggregate:.6f}",
+        "ev_wait_time_aggregate": f"{ev_wait_time_aggregate:.6f}",
+        "utilization_aggregate": f"{utilization_aggregate:.6f}",
+        "expected_wait_time_aggregate": f"{expected_wait_time_aggregate:.6f}",
+        "ev_aggregate": f"{ev_aggregate:.6f}",
+        "station_aggregate": f"{station_aggregate:.6f}",
+        "overall_score": f"{overall_score:.6f}",
         "price_sensitivity": f"{weights['price_sensitivity']:.8f}",
         "path_deviation": f"{weights['path_deviation']:.8f}",
-        "effective_queue_size": f"{weights['effective_queue_size']:.8f}",
-        "urgency": f"{weights['urgency']:.8f}",
         "expected_wait_time": f"{weights['expected_wait_time']:.8f}",
     }
 
@@ -321,6 +338,20 @@ def run_trial(
     analysis_seconds = time.perf_counter() - analysis_start
     print(f"  Analysis complete ({analysis_seconds:.2f}s)")
 
+    score_start = time.perf_counter()
+    score_values = run_scoring(run_dir.name, output_root)
+    score_seconds = time.perf_counter() - score_start
+    print(
+        f"  Scoring complete ({score_seconds:.2f}s) - "
+        f"Missed deadline: {score_values['missed_deadline_aggregate']:.6f}, "
+        f"EV wait: {score_values['ev_wait_time_aggregate']:.6f}, "
+        f"Utilization: {score_values['utilization_aggregate']:.6f}, "
+        f"Expected wait: {score_values['expected_wait_time_aggregate']:.6f}, "
+        f"EV: {score_values['ev_aggregate']:.6f}, "
+        f"Station: {score_values['station_aggregate']:.6f}, "
+        f"Overall: {score_values['overall_score']:.6f}"
+    )
+
     return build_result_row(
         iteration=iteration,
         weights=weights,
@@ -328,6 +359,14 @@ def run_trial(
         run_id=run_dir.name,
         simulation_seconds=simulation_seconds,
         analysis_seconds=analysis_seconds,
+        score_seconds=score_seconds,
+        missed_deadline_aggregate=score_values["missed_deadline_aggregate"],
+        ev_wait_time_aggregate=score_values["ev_wait_time_aggregate"],
+        utilization_aggregate=score_values["utilization_aggregate"],
+        expected_wait_time_aggregate=score_values["expected_wait_time_aggregate"],
+        ev_aggregate=score_values["ev_aggregate"],
+        station_aggregate=score_values["station_aggregate"],
+        overall_score=score_values["overall_score"],
     )
 
 
@@ -335,41 +374,45 @@ def main() -> None:
     os.chdir(PROJECT_ROOT)
     args = parse_args()
 
-    if args.iterations <= 0:
-        raise ValueError("--iterations must be > 0")
-
     headless_project = resolve_path(args.headless_project, must_be="file")
-    session_dir = create_search_session_dir(args.strategy)
+    
+    # Use existing dir if provided, otherwise create a new one
+    if args.session_dir:
+        session_dir = resolve_path(args.session_dir, must_be="dir")
+        print(f"Resuming existing session in: {session_dir}")
+    else:
+        session_dir = create_search_session_dir()
+        print(f"Created new session dir: {session_dir}")
 
     if args.results_file is None:
-        results_path = session_dir / f"{args.strategy}_search_results.csv"
+        results_path = session_dir / "grid_search_results.csv"
+
     else:
         results_path = args.results_file if args.results_file.is_absolute() else (PROJECT_ROOT / args.results_file).resolve()
 
     output_root = session_dir
     perkuet_root = load_perkuet_root()
-    ranges = build_ranges(args)
 
     session_env = {
         "ENGINE_SEED": str(args.seed),
-        "SIMULATION_START_TIME_MS": "86400000",   # Start monday 00:00 (ms)
-        "SIMULATION_END_TIME_MS": "108000000",    # End at tuesday 00:00 (ms) 259200000
+        "SIMULATION_START_TIME_MS": "111600000",   # Monday 07:00
+        "SIMULATION_END_TIME_MS": "151200000",     # Monday 18:00
+        "DISABLE_FILE_LOGGING": "true"
     }
 
-    if args.strategy == "random":
-        all_weights = random_search_weights(args, ranges)
-    else:
-        all_weights = build_grid(args.points_per_axis)
-
+    all_weights = build_grid(args.points_per_axis)
     total = len(all_weights)
+
     print(f"Running {total} trials")
     print(f"Headless project : {headless_project}")
     print(f"Perkuet root     : {perkuet_root}")
     print(f"Session dir      : {session_dir}")
     print(f"Results CSV      : {results_path}")
 
+    skip_count = args.start_iteration - 1 
+
     try:
-        for iteration, weights in enumerate(all_weights, start=1):
+        for iteration, weights in enumerate(all_weights[skip_count:], start=args.start_iteration):
             weight_summary = ", ".join(f"{k}={v:.4f}" for k, v in weights.items())
             print(f"\n[{iteration}/{total}] weights={{{weight_summary}}}")
 
