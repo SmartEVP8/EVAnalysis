@@ -56,7 +56,7 @@ def render_daily_summary(
     """
 
     avg_utilization = station_day_df["utilization"].mean()
-    avg_queue = station_day_df["total_queue_size"].mean()
+    # avg_queue = station_day_df["total_queue_size"].mean()
     total_reservations = int(station_day_df["Reservations"].sum())
     total_cancellations = int(station_day_df["Cancellations"].sum())
     day_cancel_rate = (total_cancellations / total_reservations * 100 if total_reservations > 0 else None)
@@ -86,11 +86,6 @@ def render_daily_summary(
             pl.col("utilization").quantile(0.50).alias("util_p50"),
             pl.col("utilization").quantile(0.75).alias("util_p75"),
             pl.col("utilization").max().alias("util_max"),
-
-            pl.col("total_queue_size").quantile(0.25).alias("queue_p25"),
-            pl.col("total_queue_size").quantile(0.50).alias("queue_p50"),
-            pl.col("total_queue_size").quantile(0.75).alias("queue_p75"),
-            pl.col("total_queue_size").max().alias("queue_max"),
         ],
     )
 
@@ -98,11 +93,6 @@ def render_daily_summary(
     util_p50 = station_aggregation["util_p50"].to_numpy()
     util_p75 = station_aggregation["util_p75"].to_numpy()
     util_max = station_aggregation["util_max"].to_numpy()
-
-    queue_p25 = station_aggregation["queue_p25"].to_numpy()
-    queue_p50 = station_aggregation["queue_p50"].to_numpy()
-    queue_p75 = station_aggregation["queue_p75"].to_numpy()
-    queue_max = station_aggregation["queue_max"].to_numpy()
 
     dev_p25 = dev_p50 = dev_p75 = dev_max = np.zeros(len(intervals))
 
@@ -147,7 +137,7 @@ def render_daily_summary(
     kpi_grid = gridspec.GridSpecFromSubplotSpec(2, 3, subplot_spec=grid[1], wspace=0.1, hspace=0.3)
     kpi_data = [
         ("Avg Utilization", f"{avg_utilization:.2%}" if avg_utilization is not None else "N/A", None),
-        ("Avg Queue Size", f"{avg_queue:.2f}" if avg_queue is not None else "N/A", None),
+        # ("Avg Queue Size", f"{avg_queue:.2f}" if avg_queue is not None else "N/A", None),
         ("Missed Deadlines", f"{missed_pct:.1f}%" if missed_pct is not None else "N/A", missed_subtitle),
         ("Total Reservations", f"{total_reservations:,}", None),
         ("Total Cancellations", f"{total_cancellations:,}", None),
@@ -170,17 +160,6 @@ def render_daily_summary(
         ylabel="Utilization",
         y_formatter=percentiles_formatter,
         if_empty_message="No utilization data for this day",
-    )
-
-    # Queue size
-    draw_layered_bar_chart(
-        figure.add_subplot(grid[3]),
-        interval_labels=labels,
-        p25=queue_p25, p50=queue_p50, p75=queue_p75, p_max=queue_max,
-        colors=QUEUE_COLORS,
-        title="Station Queue Size per Snapshot Interval",
-        ylabel="Queue size (EVs)",
-        if_empty_message="No queue data for this day",
     )
 
     # Path deviation

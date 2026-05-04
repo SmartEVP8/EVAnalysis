@@ -1,79 +1,141 @@
 """
-Module: station_scorer
-Scores charging station performance across utilization and queue_size metrics.
+Scores station-level simulation metrics per snapshot bucket.
 
-Each metric is aggregated across time (default: max), then each percentile
-column is scored relative to the fleet-wide maximum observed value.
+Per-bucket metrics
+utilization_score : mean normalised utilization across stations (relative to bucket max)
+expected_wait_score : mean Gaussian decay score for expected wait time
 
-Scoring convention:
-- utilization : higher is better  -> score = v / max(v)
-- queue_size : lower  is better  -> score = 1 - v / max(v)
-
-The final station score is the mean of all individual percentile scores.
+The run-wide aggregate for each metric is the mean of its per-bucket scores.
+weighted_aggregate is the weighted mean of the two metric aggregates.
 """
 
 from __future__ import annotations
+
+from dataclasses import dataclass
+from pathlib import Path
+from helpers.constants import PERCENTILES
+
 import polars as pl
 
-# Percentile groups
-PERCENTILES = ["p25", "p50", "p75", "p90", "p95", "p99"]
 
-# True means that higher score is better, False means lower score is better. Is used to figure out if we do 1-score or not.
-STATION_METRICS: dict[str, bool] = {
-    "utilization": True,
-    "queue_size":  False,
+PERCENTILE_NAMES:  list[str]   = ["p25", "p50", "p75", "p90", "p95", "p99"]
+
+STATION_METRIC_WEIGHTS = {
+    "utilization": 1,
+    "expected_wait_time": 3,
 }
 
+WAIT_DECAY_MINUTES: float = 45.0
 
-def score_stations(
-    station_snapshots: pl.DataFrame,
-    time_aggregation: str,
-) -> dict:
-    aggregation = pl.Expr.max if time_aggregation == "max" else pl.Expr.mean
-    aggregated: dict[str, float] = (
-        station_snapshots
-        .select([aggregation(pl.col(column)) for column in station_snapshots.columns if column not in ("weekday_name", "simtime_ms", "time_label")])
-        .row(0, named=True)
+
+def wait_score_expr(wait_time_column: str) -> pl.Expr:
+    """
+    Gaussian decay score for wait time: exp(-(x/WAIT_DECAY_MINUTES)²), averaged per group.
+
+    A wait of 0 minutes scores 1.0; longer waits score progressively lower,
+    with 45 minutes scoring roughly 0.37, and waits over 90 minutes scoring near 0.
+
+    exp( -(45 / 45)² ) = exp(-1) ≈ 0.3679
+    exp( -(90 / 45)² ) = exp(-4) ≈ 0.0183
+    """
+    expected_wait_score = pl.col(wait_time_column)
+    return (-((expected_wait_score / WAIT_DECAY_MINUTES) ** 2)).exp()
+
+
+def utilization_score_expr() -> pl.Expr:
+    """
+    Normalizes utilization relative to the maximum utilization in the current group.
+    """
+    max_util = pl.col("utilization").max()
+    return (
+        pl.when(max_util > 0)
+        .then(pl.col("utilization") / max_util)
+        .otherwise(0.0)
     )
 
-    metric_results: dict[str, dict] = {}
-    all_scores: list[float] = []
 
-    for metric, higher_is_better in STATION_METRICS.items():
-        # Collect the aggregated value for each percentile
-        percent_values: dict[str, float] = {}
-        for percent in PERCENTILES:
-            column = f"{metric}_{percent}"
-            if column in aggregated:
-                percent_values[percent] = float(aggregated[column])
+def compute_station_scores(run_id: str, output_root: Path) -> StationScores:
+    """
+    Computes per-bucket and aggregate station scores for a simulation run.
 
-        if not percent_values:
-            continue
+    Reads station_snapshots.parquet, computes utilization and wait-time scores
+    per bucket, and returns a StationScores dataclass.
+    """
+    snapshots_path = output_root / run_id / "analysis" / "station_snapshots.parquet"
+    snapshots = pl.read_parquet(snapshots_path)
 
-        maximum_reference = max(percent_values.values())
+    wait_time_column = "expected_wait_minutes"
+    if wait_time_column not in snapshots.columns:
+        raise ValueError(
+            f"Expected column '{wait_time_column}' not found in {snapshots_path}"
+        )
 
-        percentile_scores: dict[str, float] = {}
-        for percent, value in percent_values.items():
-            if maximum_reference == 0.0:
-                score = 1.0 if not higher_is_better else 0.0
-            else:
-                ratio = value / maximum_reference
-                score = ratio if higher_is_better else 1.0 - ratio
-            percentile_scores[percent] = round(score, 6)
+    snapshots = snapshots.with_columns([
+        wait_score_expr(wait_time_column).alias("wait_score"),
+        utilization_score_expr().alias("norm_utilization")
+    ])
 
-        metric_score = sum(percentile_scores.values()) / len(percentile_scores)
-        metric_results[metric] = {
-            "higher_is_better": higher_is_better,
-            "aggregated_values": {percentile_group: round(value, 6) for percentile_group, value in percent_values.items()},
-            "percentile_scores": percentile_scores,
-            "metric_score": round(metric_score, 6),
+
+    per_bucket = (
+        snapshots
+        .group_by("simtime_ms")
+        .agg([
+            pl.col("norm_utilization").mean().alias("utilization_score"),
+            *[
+                pl.col("norm_utilization").quantile(percentile).alias(f"utilization_{name}")
+                for percentile, name in zip(PERCENTILES, PERCENTILE_NAMES)
+            ],
+
+            pl.col("wait_score").mean().alias("expected_wait_score"),
+            *[
+                pl.col("expected_wait_minutes").quantile(percentile).alias(f"wait_mins_{name}")
+                for percentile, name in zip(PERCENTILES, PERCENTILE_NAMES)
+            ],
+        ])
+        .fill_nan(0.0)
+        .sort("simtime_ms")
+    )
+
+    utilization_aggregate: float = per_bucket["utilization_score"].mean()
+    expected_wait_aggregate: float = per_bucket["expected_wait_score"].mean()
+
+    total_weight: int = sum(STATION_METRIC_WEIGHTS.values())
+    weighted_aggregate: float = (
+        STATION_METRIC_WEIGHTS["utilization"] * utilization_aggregate
+        + STATION_METRIC_WEIGHTS["expected_wait_time"] * expected_wait_aggregate
+    ) / total_weight
+
+    return StationScores(
+        per_bucket=per_bucket,
+        utilization_aggregate=utilization_aggregate,
+        expected_wait_time_aggregate=expected_wait_aggregate,
+        weighted_aggregate=weighted_aggregate,
+        number_of_stations=snapshots["StationId"].n_unique(),
+    )
+
+
+@dataclass
+class StationScores:
+    per_bucket: pl.DataFrame
+
+    utilization_aggregate: float
+    expected_wait_time_aggregate: float
+    weighted_aggregate: float
+    number_of_stations: int
+
+    def to_dict(self) -> dict:
+        return {
+            "per_metric": {
+                "utilization": {
+                    "higher_is_better": True,
+                    "aggregate_score": round(self.utilization_aggregate, 6),
+                },
+                "expected_wait_time": {
+                    "higher_is_better": True,
+                    "aggregate_score": round(self.expected_wait_time_aggregate, 6),
+                },
+            },
+            "number_of_stations": self.number_of_stations,
+            "metric_weights": STATION_METRIC_WEIGHTS,
+            "weighted_aggregate": round(self.weighted_aggregate, 6),
         }
-        all_scores.extend(percentile_scores.values())
-
-    aggregate = sum(all_scores) / len(all_scores) if all_scores else 0.0
-
-    return {
-        "time_aggregation": time_aggregation,
-        "per_metric": metric_results,
-        "aggregate": round(aggregate, 6),
-    }
