@@ -89,9 +89,22 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--points-per-axis",
         type=int,
-        default=5,
+        default=4,
         help="Number of evenly-spaced values per weight axis (e.g. 5 → [0, 0.25, 0.5, 0.75, 1]). "
              "Total trials = points_per_axis ** 3.",
+    )
+    parser.add_argument(
+        "--session-dir",
+        type=Path,
+        default=None,
+        help="Path to an existing session directory to resume appending to.",
+    )
+
+    parser.add_argument(
+        "--start-iteration",
+        type=int,
+        default=1,
+        help="Iteration number to start/resume from.",
     )
 
     return parser.parse_args()
@@ -167,12 +180,16 @@ def run_headless_once(
     env.update(session_env)
     env.update({ENV_VAR_BY_WEIGHT[name]: f"{value:.8f}" for name, value in weights.items()})
 
-    subprocess.run(
+    result = subprocess.run(
         ["dotnet", "run", "--project", str(headless_project), "-c", build_config],
-        check=True,
+        check=False,
         cwd=str(PROJECT_ROOT.parent),
         env=env,
+        stdout=subprocess.DEVNULL
     )
+
+    if result.returncode not in [0, 139]:
+        raise RuntimeError(f"dotnet run failed with exit status {result.returncode}")
 
     all_run_dirs = [path for path in perkuet_root.iterdir() if path.is_dir()]
 
@@ -359,10 +376,18 @@ def main() -> None:
     args = parse_args()
 
     headless_project = resolve_path(args.headless_project, must_be="file")
-    session_dir = create_search_session_dir()
+    
+    # Use existing dir if provided, otherwise create a new one
+    if args.session_dir:
+        session_dir = resolve_path(args.session_dir, must_be="dir")
+        print(f"Resuming existing session in: {session_dir}")
+    else:
+        session_dir = create_search_session_dir()
+        print(f"Created new session dir: {session_dir}")
 
     if args.results_file is None:
         results_path = session_dir / "grid_search_results.csv"
+
     else:
         results_path = args.results_file if args.results_file.is_absolute() else (PROJECT_ROOT / args.results_file).resolve()
 
@@ -373,6 +398,7 @@ def main() -> None:
         "ENGINE_SEED": str(args.seed),
         "SIMULATION_START_TIME_MS": "86400000",   # Start monday 00:00 (ms)
         "SIMULATION_END_TIME_MS": "259200000",    # End at tuesday 00:00 (ms) 259200000(6hours) 
+        "DISABLE_FILE_LOGGING": "true"
     }
 
     all_weights = build_grid(args.points_per_axis)
@@ -384,8 +410,10 @@ def main() -> None:
     print(f"Session dir      : {session_dir}")
     print(f"Results CSV      : {results_path}")
 
+    skip_count = args.start_iteration - 1 
+
     try:
-        for iteration, weights in enumerate(all_weights, start=1):
+        for iteration, weights in enumerate(all_weights[skip_count:], start=args.start_iteration):
             weight_summary = ", ".join(f"{k}={v:.4f}" for k, v in weights.items())
             print(f"\n[{iteration}/{total}] weights={{{weight_summary}}}")
 
