@@ -110,7 +110,7 @@ def analyse_arrival(
         .with_columns([
             (pl.col("PathDeviation") / 1_000 / 60).alias("path_deviation_minutes"),
             (
-                (pl.col("ActualArrivalTime") - pl.col("ExpectedArrivalTime"))
+                (pl.col("ActualArrivalTime").cast(pl.Int64) - pl.col("ExpectedArrivalTime").cast(pl.Int64))
                 .clip(lower_bound=0) / 1_000 / 60
             ).alias("delta_arrival_minutes"),
             pl.col("MissedDeadline").cast(pl.Boolean).alias("missed_deadline"),
@@ -155,7 +155,7 @@ def analyse_arrival(
                 pl.col("missed_deadline").count().alias("total_arrivals"),
             ]
             + build_bucket_agg_exprs("path_deviation_bucket", "path_deviation")
-            + build_bucket_agg_exprs("delta_arrival_bucket",  "delta_arrival")
+            + build_bucket_agg_exprs("delta_arrival_bucket", "delta_arrival")
         )
         .sort(["weekday_name", "simtime_ms"])
     )

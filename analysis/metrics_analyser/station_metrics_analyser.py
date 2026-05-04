@@ -82,7 +82,7 @@ def analyse_station(
     snapshot_df = (
         df
         .with_columns([
-            (pl.col("ExpectedWaitTimeMiliseconds") / 60_000)
+            (pl.col("ExpectedWaitTimeMiliseconds") / 60_000).cast(pl.Int64)
               .alias("expected_wait_minutes"),
 
             pl.when(pl.col("Reservations") > 0)
