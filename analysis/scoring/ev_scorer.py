@@ -22,8 +22,8 @@ from helpers.io_helpers import infer_snapshot_interval_ms
 from helpers.constants import PERCENTILES
 
 PATH_DEVIATION_BUCKETS: list[tuple[float, int]] = [
-    (5,            1),
-    (10,           1),
+    (5,            0),
+    (10,           0),
     (15,           1),
     (30,           1),
     (60,           2),

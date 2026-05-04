@@ -2,7 +2,7 @@
 Scores station-level simulation metrics per snapshot bucket.
 
 Per-bucket metrics
-utilization_score : mean normalised utilization across stations (relative to bucket max)
+utilization_score : mean observed utilization across stations
 expected_wait_score : mean Gaussian decay score for expected wait time
 """
 
@@ -39,12 +39,7 @@ def expected_wait_score(wait_time_column: str) -> pl.Expr:
 
 
 def utilization_score(utilization_column: str) -> pl.Expr:
-    max_util = pl.col(utilization_column).max()
-    return (
-        pl.when(max_util > 0)
-        .then(pl.col(utilization_column) / max_util)
-        .otherwise(0.0)
-    )
+    return pl.col(utilization_column).clip(0.0, 1.0)
 
 
 def compute_station_scores(run_id: str, output_root: Path) -> StationScores:
