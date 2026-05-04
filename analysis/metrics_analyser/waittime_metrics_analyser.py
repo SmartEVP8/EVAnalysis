@@ -45,7 +45,7 @@ def analyse_wait_time(
     snapshot_df = (
         df
         .with_columns([
-            (pl.col("WaitTimeInQueue") / 60_000).alias("wait_minutes"),
+            (pl.col("WaitTimeInQueue") / 60_000).cast(pl.Int64).alias("wait_minutes"),
             (
                 (pl.col("simtime_ms") // snapshot_interval_ms) * snapshot_interval_ms
             ).cast(pl.Int64).alias("simtime_ms"),
