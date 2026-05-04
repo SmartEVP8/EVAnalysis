@@ -1,7 +1,7 @@
 import csv
 from pathlib import Path
 
-from random_grid_search import (
+from grid_search import (
     load_perkuet_root,
     validate_metrics_parquet,
     run_analysis,
@@ -79,7 +79,7 @@ def repair_csv(csv_path_str: str):
         print("\nNo rows needed fixing.")
 
 if __name__ == "__main__":
-    # UPDATE THIS PATH to exactly where your broken CSV is located
-    TARGET_CSV = "/home/fiske/P8/EVAnalysis/runs/search_sessions/grid_20260503_024330/grid_search_results_cleaned.csv" 
+    # UPDATE THIS PATH to where the broken CSV is located
+    TARGET_CSV = "" 
     
     repair_csv(TARGET_CSV)

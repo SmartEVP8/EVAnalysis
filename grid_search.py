@@ -185,7 +185,6 @@ def run_headless_once(
         check=False,
         cwd=str(PROJECT_ROOT.parent),
         env=env,
-        stdout=subprocess.DEVNULL
     )
 
     if result.returncode not in [0, 139]:
@@ -397,8 +396,8 @@ def main() -> None:
     session_env = {
         "ENGINE_SEED": str(args.seed),
         "SIMULATION_START_TIME_MS": "111600000",   # Monday 07:00
-        "SIMULATION_END_TIME_MS": "144000000",    # Monday 16:00   # End at tuesday 00:00 (ms) 259200000(6hours) 
-        "DISABLE_FILE_LOGGING": "false"
+        "SIMULATION_END_TIME_MS": "151200000",     # Monday 18:00
+        "DISABLE_FILE_LOGGING": "true"
     }
 
     all_weights = build_grid(args.points_per_axis)
