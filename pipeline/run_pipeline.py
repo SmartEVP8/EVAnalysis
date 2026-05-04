@@ -58,11 +58,11 @@ class RunPaths:
     arrival_buckets: Path
 
     @classmethod
-    def from_run_dir(cls, run_dir: Path, output_root: Path = OUTPUT_ROOT) -> RunPaths:
+    def from_run_dir(run_paths: RunPaths, run_dir: Path, output_root: Path = OUTPUT_ROOT) -> RunPaths:
         analysis_dir = output_root / run_dir.name / "analysis"
         outlier_dir = output_root / run_dir.name / "outliers"
 
-        return cls(
+        return run_paths(
             run_dir=run_dir,
 
             station_metrics=run_dir / "StationSnapshotMetric.parquet",
