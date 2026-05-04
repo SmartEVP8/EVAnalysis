@@ -41,22 +41,21 @@ def compute_per_snapshot(
     ev_per_snapshot = ev_scores.per_snapshot.with_columns([
         (
             (
-                EV_METRIC_WEIGHTS["path_deviation"]   * pl.col("path_deviation_score")
-                + EV_METRIC_WEIGHTS["delta_arrival"]  * pl.col("delta_arrival_score")
-                + EV_METRIC_WEIGHTS["ev_wait_time"]   * pl.col("ev_wait_time_score")
+                EV_METRIC_WEIGHTS["path_deviation"] * pl.col("path_deviation_score")
+                + EV_METRIC_WEIGHTS["delta_arrival"] * pl.col("delta_arrival_score")
+                + EV_METRIC_WEIGHTS["ev_wait_time"] * pl.col("ev_wait_time_score")
                 + EV_METRIC_WEIGHTS["missed_deadline"] * pl.col("missed_deadline_score")
             ) / ev_total_weight
         ).alias("ev_weighted_score")
-    ]).select(["simtime_ms", "ev_weighted_score"])
-
+    ])
     station_per_bucket = station_scores.per_bucket.with_columns([
         (
             (
-                STATION_METRIC_WEIGHTS["utilization"]        * pl.col("utilization_score")
+                STATION_METRIC_WEIGHTS["utilization"] * pl.col("utilization_score")
                 + STATION_METRIC_WEIGHTS["expected_wait_time"] * pl.col("expected_wait_score")
             ) / station_total_weight
         ).alias("station_weighted_score")
-    ]).select(["simtime_ms", "station_weighted_score"])
+    ])
 
     return (
         ev_per_snapshot
@@ -114,10 +113,44 @@ class SimulationScore:
             "overall_aggregate": round(self.overall_aggregate, 6),
         }
 
+    def write_parquet(self, output_path: Path) -> None:
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+    
+        df = self.per_snapshot.with_columns(
+            pl.col("simtime_ms")
+            .map_elements(simtime_ms_to_label, return_dtype=pl.String)
+            .alias("time")
+        ).select([
+            "time",
+            "simtime_ms",
+            "ev_weighted_score",
+            "station_weighted_score",
+            "combined_score",
+            "path_deviation_score",
+            "delta_arrival_score",
+            "ev_wait_time_score",
+            "missed_deadline_score",
+            "missed_proportion",
+            "utilization_score",
+            "expected_wait_score",
+        ])
+    
+        df.write_parquet(output_path)
+        print(f"[SimulationScorer] Wrote {output_path}")
+
+        
     def write_json(self, output_path: Path) -> None:
         output_path.parent.mkdir(parents=True, exist_ok=True)
+        summary = {
+            "run_id": self.run_id,
+            "simulation_config": {"source": self.source_path},
+            "ev_scores": self.ev_scores.to_dict(),
+            "station_scores": self.station_scores.to_dict(),
+            "group_weights": GROUP_WEIGHTS,
+            "overall_aggregate": round(self.overall_aggregate, 6),
+        }
         with output_path.open("w", encoding="utf-8") as f:
-            json.dump(self.to_dict(), f, indent=2)
+            json.dump(summary, f, indent=2)
         print(f"[SimulationScorer] Wrote {output_path}")
 
 
@@ -128,10 +161,11 @@ def compute_simulation_score(
     output_path: Path | None = None,
 ) -> SimulationScore:
     """
-    Computes the combined simulation score and persists it as JSON.
+    
     """
     if output_path is None:
-        output_path = output_root / run_id / "simulation_score.json"
+        parquet_path = output_root / run_id / "simulation_score.parquet"
+        json_path = output_root / run_id / "simulation_score.json"
 
     ev_scores = compute_ev_scores(run_id, output_root)
     station_scores = compute_station_scores(run_id, output_root)
@@ -142,5 +176,8 @@ def compute_simulation_score(
         ev_scores=ev_scores,
         station_scores=station_scores,
     )
-    result.write_json(output_path)
+    
+    result.write_parquet(parquet_path)
+    result.write_json(json_path)
+    
     return result
