@@ -64,7 +64,7 @@ class DenmarkGrid:
         return np.tile(lons[None, :], (self.height, 1))
 
     @classmethod
-    def default(cls, resolution_km: float = 5.0) -> "DenmarkGrid":
+    def default(grid: DenmarkGrid, resolution_km: float = 5.0) -> "DenmarkGrid":
         """
         Factory method to create a grid based on a kilometer resolution.
 
@@ -82,7 +82,7 @@ class DenmarkGrid:
         height = int((LAT_MAX - LAT_MIN) * km_per_lat_deg / resolution_km)
         width  = int((LON_MAX - LON_MIN) * km_per_lon_deg / resolution_km)
 
-        return cls(
+        return grid(
             lat_min=LAT_MIN, lat_max=LAT_MAX,
             lon_min=LON_MIN, lon_max=LON_MAX,
             height=height,   width=width,
