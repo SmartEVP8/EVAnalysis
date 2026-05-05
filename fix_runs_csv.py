@@ -7,7 +7,6 @@ from grid_search import (
     validate_metrics_parquet,
     run_analysis,
     run_scoring,
-    PROJECT_ROOT,
     RESULT_FIELDNAMES
 )
 
@@ -29,8 +28,6 @@ def repair_csv(csv_path_str: str):
         return
 
     perkuet_root = load_perkuet_root()
-    output_root = PROJECT_ROOT / "runs" / "recovery_scoring"
-    output_root.mkdir(parents=True, exist_ok=True)
 
     # 1. Get all run folders sorted by creation time
     all_run_dirs = [p for p in perkuet_root.iterdir() if p.is_dir()]
@@ -61,11 +58,12 @@ def repair_csv(csv_path_str: str):
                 print(f"  Validating parquet metrics...")
                 validate_metrics_parquet(run_dir)
                 
+                # Use perkuet_root to process the update in-place rather than making a recovery folder
                 print(f"  Running analysis pipeline...")
-                run_analysis(run_dir, output_root)
+                run_analysis(run_dir, perkuet_root)
                 
                 print(f"  Computing scores...")
-                scores = run_scoring(run_dir.name, output_root)
+                scores = run_scoring(run_dir.name, perkuet_root)
                 
                 # Update the row data in memory
                 row["run_id"] = run_dir.name
