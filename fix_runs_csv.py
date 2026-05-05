@@ -1,5 +1,6 @@
 import csv
 import shutil
+import sys
 from pathlib import Path
 
 from grid_search import (
@@ -9,6 +10,7 @@ from grid_search import (
     run_scoring,
     RESULT_FIELDNAMES
 )
+from helpers.constants import OUTPUT_ROOT
 
 
 def clean_analysis_outputs(run_dir: Path) -> None:
@@ -22,9 +24,17 @@ def clean_analysis_outputs(run_dir: Path) -> None:
 
 
 def repair_csv(csv_path_str: str):
-    csv_path = Path(csv_path_str)
+    if not csv_path_str.strip():
+        print("Error: CSV path is empty. Pass a CSV path as an argument.")
+        print("Usage: uv run fix_runs_csv.py /path/to/grid_search_results.csv")
+        return
+
+    csv_path = Path(csv_path_str).expanduser()
     if not csv_path.exists():
         print(f"Error: Could not find CSV at {csv_path}")
+        return
+    if not csv_path.is_file():
+        print(f"Error: Expected a CSV file but got a directory/path: {csv_path}")
         return
 
     perkuet_root = load_perkuet_root()
@@ -60,10 +70,10 @@ def repair_csv(csv_path_str: str):
                 
                 # Use perkuet_root to process the update in-place rather than making a recovery folder
                 print(f"  Running analysis pipeline...")
-                run_analysis(run_dir, perkuet_root)
+                run_analysis(run_dir, OUTPUT_ROOT)
                 
                 print(f"  Computing scores...")
-                scores = run_scoring(run_dir.name, perkuet_root)
+                scores = run_scoring(run_dir.name, OUTPUT_ROOT)
                 
                 # Update the row data in memory
                 row["run_id"] = run_dir.name
@@ -97,7 +107,5 @@ def repair_csv(csv_path_str: str):
         print("\nNo rows needed fixing.")
 
 if __name__ == "__main__":
-    # UPDATE THIS PATH to where the broken CSV is located
-    TARGET_CSV = "" 
-    
-    repair_csv(TARGET_CSV)
+    target_csv = sys.argv[1] if len(sys.argv) > 1 else ""
+    repair_csv(target_csv)
