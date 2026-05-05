@@ -24,21 +24,21 @@ from helpers.constants import PERCENTILES
 PATH_DEVIATION_BUCKETS: list[tuple[float, int]] = [
     (5,            0),
     (10,           0),
-    (15,           1),
-    (30,           1),
-    (60,           2),
-    (float("inf"), 3),
+    (15,           2),
+    (30,           6),
+    (60,           12),
+    (float("inf"), 20),
 ]
 PATH_DEVIATION_BUCKET_LABELS: list[str] = ["5", "10", "15", "30", "60", "60+"]
 
 DELTA_ARRIVAL_BUCKETS: list[tuple[float, int]] = [
     (0,            0),
     (5,            1),
-    (10,           1),
-    (15,           1),
-    (30,           1),
-    (60,           2),
-    (float("inf"), 3),
+    (10,           2),
+    (15,           3),
+    (30,           6),
+    (60,           10),
+    (float("inf"), 20),
 ]
 DELTA_ARRIVAL_BUCKET_LABELS: list[str] = ["0", "5", "10", "15", "30", "60", "60+"]
 
@@ -62,8 +62,6 @@ def bucket_score(col: str, buckets: list[tuple[float, int]]) -> pl.Expr:
     Each row is assigned the weight of the bucket it falls into. The group score
     is mean(row_weight) / total_weight, so the score ranges between 0 and 1.
     """
-    total_weight: int = sum(weight for _, weight in buckets)
-
     previous_upper = float("-inf")
     weight_expr: pl.Expr = pl.lit(None, dtype=pl.Float64)
 
@@ -78,7 +76,7 @@ def bucket_score(col: str, buckets: list[tuple[float, int]]) -> pl.Expr:
         weight_expr = pl.when(bucket_filter).then(pl.lit(float(weight))).otherwise(weight_expr)
         previous_upper = upper_bound
 
-    return (1.0 - weight_expr.mean() / total_weight).alias(f"{col}_score")
+    return (1.0 - weight_expr.sum() / pl.col(col).count()).alias(f"{col}_score")
 
 
 def wait_score(col: str) -> pl.Expr:

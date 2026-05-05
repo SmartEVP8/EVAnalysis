@@ -206,7 +206,6 @@ class SimulationScore:
             "delta_arrival_score",
             "ev_wait_time_score",
             "missed_deadline_score",
-            "missed_proportion",
             "utilization_score",
             "expected_wait_score",
         ])
