@@ -246,12 +246,12 @@ def run_scoring(run_id: str, output_root: Path) -> dict[str, float]:
         output_root=output_root,
     )
     return {
-        "missed_deadline_aggregate": sim_score.ev_scores.missed_deadline_aggregate,
-        "ev_wait_time_aggregate": sim_score.ev_scores.ev_wait_time_aggregate,
-        "utilization_aggregate": sim_score.station_scores.utilization_aggregate,
-        "expected_wait_time_aggregate": sim_score.station_scores.expected_wait_time_aggregate,
-        "ev_aggregate": sim_score.ev_scores.weighted_aggregate,
-        "station_aggregate": sim_score.station_scores.weighted_aggregate,
+        "missed_deadline_aggregate": sim_score.missed_deadline_aggregate,
+        "ev_wait_time_aggregate": sim_score.ev_wait_time_aggregate,
+        "utilization_aggregate": sim_score.utilization_aggregate,
+        "expected_wait_time_aggregate": sim_score.expected_wait_aggregate,
+        "ev_aggregate": sim_score.ev_weighted_aggregate,
+        "station_aggregate": sim_score.station_weighted_aggregate,
         "overall_score": sim_score.overall_aggregate,
     }
 
@@ -396,8 +396,8 @@ def main() -> None:
     session_env = {
         "ENGINE_SEED": str(args.seed),
         "SIMULATION_START_TIME_MS": "111600000",   # Monday 07:00
-        "SIMULATION_END_TIME_MS": "151200000",     # Monday 18:00
-        "DISABLE_FILE_LOGGING": "true"
+        "SIMULATION_END_TIME_MS": "113100000",     # Monday 18:00
+        "DISABLE_FILE_LOGGING": "false"
     }
 
     all_weights = build_grid(args.points_per_axis)
