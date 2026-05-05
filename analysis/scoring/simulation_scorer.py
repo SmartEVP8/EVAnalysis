@@ -37,6 +37,8 @@ TOTAL_GROUP_WEIGHT: int = sum(GROUP_WEIGHTS.values())
 
 SIM_EPOCH = datetime(2024, 1, 1, 0, 0, 0)
 
+WARMUP_MS: int = (3 * 60 * 60 * 1000) - 1200000  # 3 hours minus 20 minutes to exclude the initial ramp-up and ramp-down periods
+
 
 def simtime_ms_to_label(simtime_ms: int) -> str:
     dt = SIM_EPOCH + timedelta(milliseconds=simtime_ms)
@@ -50,7 +52,7 @@ def compute_per_snapshot(
     ev_total_weight = sum(EV_METRIC_WEIGHTS.values())
     station_total_weight = sum(STATION_METRIC_WEIGHTS.values())
 
-    ev_per_snapshot = ev_scores.per_snapshot.with_columns([
+    ev_per_snapshot = ev_scores.per_snapshot.filter(pl.col("simtime_ms") > WARMUP_MS).with_columns([
         (
             (
                 EV_METRIC_WEIGHTS["path_deviation"] * pl.col("path_deviation_score")
@@ -61,7 +63,7 @@ def compute_per_snapshot(
         ).alias("ev_weighted_score")
     ])
 
-    station_per_bucket = station_scores.per_bucket.with_columns([
+    station_per_bucket = station_scores.per_bucket.filter(pl.col("simtime_ms") > WARMUP_MS).with_columns([
         (
             (
                 STATION_METRIC_WEIGHTS["utilization"] * pl.col("utilization_score")
