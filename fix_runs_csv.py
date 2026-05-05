@@ -1,4 +1,5 @@
 import csv
+import shutil
 from pathlib import Path
 
 from grid_search import (
@@ -9,6 +10,17 @@ from grid_search import (
     PROJECT_ROOT,
     RESULT_FIELDNAMES
 )
+
+
+def clean_analysis_outputs(run_dir: Path) -> None:
+    """Remove analysis output directories to ensure fresh re-analysis."""
+    output_dirs = ["analysis", "buckets", "outliers", "percentiles"]
+    for dirname in output_dirs:
+        dir_path = run_dir / dirname
+        if dir_path.exists():
+            print(f"  Cleaning {dirname}/...")
+            shutil.rmtree(dir_path)
+
 
 def repair_csv(csv_path_str: str):
     csv_path = Path(csv_path_str)
@@ -42,9 +54,17 @@ def repair_csv(csv_path_str: str):
             print(f"\nFixing Iteration {iteration} using folder {run_dir.name}...")
             
             try:
-                # Score the folder
+                # Clean up previous analysis outputs and re-run the entire analysis
+                print(f"  Cleaning previous analysis outputs...")
+                clean_analysis_outputs(run_dir)
+                
+                print(f"  Validating parquet metrics...")
                 validate_metrics_parquet(run_dir)
+                
+                print(f"  Running analysis pipeline...")
                 run_analysis(run_dir, output_root)
+                
+                print(f"  Computing scores...")
                 scores = run_scoring(run_dir.name, output_root)
                 
                 # Update the row data in memory
