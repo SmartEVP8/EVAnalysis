@@ -32,7 +32,7 @@ PATH_DEVIATION_BUCKETS: list[tuple[float, int]] = [
 PATH_DEVIATION_BUCKET_LABELS: list[str] = ["5", "10", "15", "30", "60", "60+"]
 
 DELTA_ARRIVAL_BUCKETS: list[tuple[float, int]] = [
-    (0,            2),
+    (0,            0),
     (5,            1),
     (10,           1),
     (15,           1),
@@ -57,7 +57,7 @@ WAIT_DECAY_MINUTES: float = 45.0
 def bucket_score(col: str, buckets: list[tuple[float, int]]) -> pl.Expr:
     """
     Builds a Polars expression that computes the normalised bucket-penalty score
-    for *col* within a group.
+    for col within a group.
 
     Each row is assigned the weight of the bucket it falls into. The group score
     is mean(row_weight) / total_weight, so the score ranges between 0 and 1.
@@ -78,7 +78,7 @@ def bucket_score(col: str, buckets: list[tuple[float, int]]) -> pl.Expr:
         weight_expr = pl.when(bucket_filter).then(pl.lit(float(weight))).otherwise(weight_expr)
         previous_upper = upper_bound
 
-    return (weight_expr.mean() / total_weight).alias(f"{col}_score")
+    return (1.0 - weight_expr.mean() / total_weight).alias(f"{col}_score")
 
 
 def wait_score(col: str) -> pl.Expr:
