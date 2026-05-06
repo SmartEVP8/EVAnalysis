@@ -51,8 +51,17 @@ def compute_per_snapshot(
 ) -> pl.DataFrame:
     ev_total_weight = sum(EV_METRIC_WEIGHTS.values())
     station_total_weight = sum(STATION_METRIC_WEIGHTS.values())
+    
+    earliest_ev_time = ev_scores.per_snapshot["simtime_ms"].min()
+    earliest_station_time = station_scores.per_bucket["simtime_ms"].min()
 
-    ev_per_snapshot = ev_scores.per_snapshot.filter(pl.col("simtime_ms") > WARMUP_MS).with_columns([
+    if earliest_ev_time is None or earliest_station_time is None:
+        raise ValueError("Cannot compute warmup cutoff: one or both score DataFrames are empty.")
+
+    sim_start_ms = min(earliest_ev_time, earliest_station_time)
+    warmup_cutoff_ms = sim_start_ms + WARMUP_MS
+
+    ev_per_snapshot = ev_scores.per_snapshot.filter(pl.col("simtime_ms") > warmup_cutoff_ms).with_columns([
         (
             (
                 EV_METRIC_WEIGHTS["path_deviation"] * pl.col("path_deviation_score")
@@ -63,7 +72,7 @@ def compute_per_snapshot(
         ).alias("ev_weighted_score")
     ])
 
-    station_per_bucket = station_scores.per_bucket.filter(pl.col("simtime_ms") > WARMUP_MS).with_columns([
+    station_per_bucket = station_scores.per_bucket.filter(pl.col("simtime_ms") > warmup_cutoff_ms).with_columns([
         (
             (
                 STATION_METRIC_WEIGHTS["utilization"] * pl.col("utilization_score")
