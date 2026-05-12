@@ -1,5 +1,5 @@
 """
-Ths script manages configuration loading, handles command-line arguments, 
+This script manages configuration loading, handles command-line arguments, 
 and resolves which simulation run should be processed.
 """
 
