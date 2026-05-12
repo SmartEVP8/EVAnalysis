@@ -1,15 +1,3 @@
-"""
-Scores EV-level simulation metrics per snapshot bucket.
-
-Per-bucket metrics
-path_deviation  : time-bucket weighted penalty for route deviation
-delta_arrival   : time-bucket weighted penalty for late arrival
-ev_wait_time    : Gaussian decay score for queue wait time
-missed_deadline : proportion of non-direct-drive arrivals that missed
-
-Aggregation across snapshots is the responsibility of SimulationScore.
-"""
-
 from __future__ import annotations
 
 import math
@@ -18,49 +6,12 @@ from pathlib import Path
 
 import polars as pl
 
+from analysis.scoring.scoring_config import ScoringConfig
 from helpers.io_helpers import infer_snapshot_interval_ms
-
-PATH_DEVIATION_BUCKETS: list[tuple[float, int]] = [
-    (5,            0),
-    (10,           0),
-    (15,           2),
-    (30,           6),
-    (60,           12),
-    (float("inf"), 15),
-]
-PATH_DEVIATION_BUCKET_LABELS: list[str] = ["5", "10", "15", "30", "60", "60+"]
-
-DELTA_ARRIVAL_BUCKETS: list[tuple[float, int]] = [
-    (0,            0),
-    (5,            1),
-    (10,           2),
-    (15,           3),
-    (30,           6),
-    (60,           10),
-    (float("inf"), 15),
-]
-DELTA_ARRIVAL_BUCKET_LABELS: list[str] = ["0", "5", "10", "15", "30", "60", "60+"]
 
 PERCENTILE_NAMES: list[str] = ["p25", "p50", "p75", "p90", "p95", "p99"]
 
-EV_METRIC_WEIGHTS = {
-    "path_deviation": 1,
-    "delta_arrival": 1,
-    "ev_wait_time": 3,
-    "missed_deadline": 2,
-}
-
-WAIT_DECAY_MINUTES: float = 45.0
-
-
 def bucket_score(col: str, buckets: list[tuple[float, int]]) -> pl.Expr:
-    """
-    Builds a Polars expression that computes the normalised bucket-penalty score
-    for col within a group.
-
-    Each row is assigned the weight of the bucket it falls into. The group score
-    is mean(row_weight) / total_weight, so the score ranges between 0 and 1.
-    """
     previous_upper = float("-inf")
     weight_expr: pl.Expr = pl.lit(None, dtype=pl.Float64)
 
@@ -78,23 +29,11 @@ def bucket_score(col: str, buckets: list[tuple[float, int]]) -> pl.Expr:
     return (1.0 - weight_expr.sum() / pl.col(col).count()).alias(f"{col}_score")
 
 
-def wait_score(col: str) -> pl.Expr:
-    """
-    Gaussian decay score for wait time: exp(-(x/WAIT_DECAY_MINUTES)²), averaged per group.
-
-    A wait of 0 minutes scores 1.0; longer waits score progressively lower,
-    with 45 minutes scoring roughly 0.37, and waits over 90 minutes scoring near 0.
-
-    exp( -(45 / 45)² ) = exp(-1) ≈ 0.3679
-    exp( -(90 / 45)² ) = exp(-4) ≈ 0.0183
-    """
-    return ((-((pl.col(col) / WAIT_DECAY_MINUTES) ** 2)).exp())
+def wait_score(col: str, wait_decay_minutes: float) -> pl.Expr:
+    return ((-((pl.col(col) / wait_decay_minutes) ** 2)).exp())
 
 
 def missed_deadline_score() -> list[pl.Expr]:
-    """
-    Returns aggregation expressions for missed-deadline statistics per group.
-    """
     total = pl.len()
     direct = pl.col("drive_directly").sum()
     missed = pl.col("missed_deadline").sum()
@@ -110,24 +49,8 @@ def missed_deadline_score() -> list[pl.Expr]:
     ]
 
 
-def compute_ev_scores(run_id: str, output_root: Path) -> EVScores:
-    """
-    Computes per-snapshot EV scores for a simulation run.
-
-    Reads arrival_snapshots.parquet and waittime_snapshots.parquet, aligns
-    them onto a shared bucket grid, and returns an EVScores dataclass.
-
-    Aggregation across snapshots is the responsibility of SimulationScore.
-
-    Args:
-        run_id: Simulation run identifier (e.g. 'Run_001').
-        output_root: Root directory containing all run output.
-
-    Returns:
-        EVScores with per-snapshot DataFrame only.
-    """
+def compute_ev_scores(run_id: str, output_root: Path, config: ScoringConfig) -> EVScores:
     base_dir = output_root / run_id
-
     arrivals = pl.read_parquet(base_dir / "analysis" / "arrival_snapshots.parquet")
 
     snapshot_interval_ms = infer_snapshot_interval_ms(
@@ -143,8 +66,8 @@ def compute_ev_scores(run_id: str, output_root: Path) -> EVScores:
         ])
         .group_by("simtime_ms")
         .agg([
-            bucket_score("path_deviation_minutes", PATH_DEVIATION_BUCKETS),
-            bucket_score("delta_arrival_minutes",  DELTA_ARRIVAL_BUCKETS),
+            bucket_score("path_deviation_minutes", config.path_deviation_buckets),
+            bucket_score("delta_arrival_minutes",  config.delta_arrival_buckets),
             *missed_deadline_score(),
         ])
     )
@@ -152,7 +75,7 @@ def compute_ev_scores(run_id: str, output_root: Path) -> EVScores:
     wait_scores = (
         pl.read_parquet(base_dir / "percentiles" / "waittime" / "waittime_percentiles.parquet")
         .with_columns([
-            *[wait_score(f"wait_p{name[1:]}").alias(f"wait_score_{name}") for name in PERCENTILE_NAMES]
+            *[wait_score(f"wait_p{name[1:]}", config.wait_decay_minutes).alias(f"wait_score_{name}") for name in PERCENTILE_NAMES]
         ]).with_columns([
             pl.mean_horizontal([f"wait_score_{name}" for name in PERCENTILE_NAMES])
               .alias("ev_wait_time_score")
