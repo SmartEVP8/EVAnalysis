@@ -396,7 +396,7 @@ def main() -> None:
     session_env = {
         "ENGINE_SEED": str(args.seed),
         "SIMULATION_START_TIME_MS": "111600000",   # Monday 07:00
-        "SIMULATION_END_TIME_MS": "113100000",     # Monday 18:00
+        "SIMULATION_END_TIME_MS": "151200000",     # Monday 18:00
         "DISABLE_FILE_LOGGING": "false"
     }
 
