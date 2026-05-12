@@ -19,7 +19,6 @@ from pathlib import Path
 import polars as pl
 
 from helpers.io_helpers import infer_snapshot_interval_ms
-from helpers.constants import PERCENTILES
 
 PATH_DEVIATION_BUCKETS: list[tuple[float, int]] = [
     (5,            0),
