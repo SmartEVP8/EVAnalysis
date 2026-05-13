@@ -217,6 +217,9 @@ def compute_simulation_score(
     if output_path is None:
         parquet_path = output_root / run_id / "simulation_score.parquet"
         json_path = output_root / run_id / "simulation_score.json"
+    else:
+        parquet_path = output_path
+        json_path = output_path.with_suffix(".json")
 
     ev_scores = compute_ev_scores(run_id, output_root, config)
     station_scores = compute_station_scores(run_id, output_root, config)
