@@ -20,11 +20,13 @@ from analysis.scoring.ev_scorer import (
     PATH_DEVIATION_BUCKETS,
     DELTA_ARRIVAL_BUCKET_LABELS,
     DELTA_ARRIVAL_BUCKETS,
+    WAIT_TIME_BUCKETS,
     compute_ev_scores,
 )
 from analysis.scoring.station_scorer import (
     StationScores,
     STATION_METRIC_WEIGHTS,
+    EXPECTED_WAIT_TIME_BUCKETS,
     compute_station_scores,
 )
 
@@ -162,6 +164,8 @@ class SimulationScore:
                     },
                     "ev_wait_time": {
                         "higher_is_better": False,
+                        "percentile_labels": [name for name, _ in WAIT_TIME_BUCKETS],
+                        "percentile_weights": [w for _, w in WAIT_TIME_BUCKETS],
                         "aggregate_score": round(self.ev_wait_time_aggregate, 6),
                     },
                     "missed_deadline": {
@@ -180,6 +184,8 @@ class SimulationScore:
                     },
                     "expected_wait_time": {
                         "higher_is_better": True,
+                        "percentile_labels": [name for name, _ in EXPECTED_WAIT_TIME_BUCKETS],
+                        "percentile_weights": [w for _, w in EXPECTED_WAIT_TIME_BUCKETS],
                         "aggregate_score": round(self.expected_wait_aggregate, 6),
                     },
                 },
