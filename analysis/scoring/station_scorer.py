@@ -10,12 +10,22 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from helpers.constants import PERCENTILES
 
 import polars as pl
 
 
 PERCENTILE_NAMES: list[str] = ["p25", "p50", "p75", "p90", "p95", "p99"]
+
+EXPECTED_WAIT_TIME_BUCKETS: list[tuple[str, int]] = [
+    ("p25",  1),
+    ("p50",  3),
+    ("p75",  5),
+    ("p90",  6),
+    ("p95",  10),
+    ("p99",  50),
+]
+
+TOTAL_WAIT_WEIGHT: float = float(sum(w for _, w in EXPECTED_WAIT_TIME_BUCKETS))
 
 STATION_METRIC_WEIGHTS = {
     "utilization": 1,
@@ -54,8 +64,10 @@ def compute_station_scores(run_id: str, output_root: Path) -> StationScores:
     ]).with_columns([
         *[expected_wait_score(f"wait_time_{name}").alias(f"wait_score_{name}") for name in PERCENTILE_NAMES]
     ]).with_columns([
-        pl.mean_horizontal([f"wait_score_{name}" for name in PERCENTILE_NAMES])
-          .alias("expected_wait_score")
+        pl.sum_horizontal([
+            pl.col(f"wait_score_{name}") * weight
+            for name, weight in EXPECTED_WAIT_TIME_BUCKETS
+        ]).alias("expected_wait_score") / TOTAL_WAIT_WEIGHT
     ])
 
     return StationScores(

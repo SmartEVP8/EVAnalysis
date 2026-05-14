@@ -6,3 +6,4 @@ __init__.py
 .ipynb_checkpoints/
 runs/*
 .vscode
+investigations/*

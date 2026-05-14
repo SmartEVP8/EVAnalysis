@@ -41,6 +41,17 @@ DELTA_ARRIVAL_BUCKETS: list[tuple[float, int]] = [
 ]
 DELTA_ARRIVAL_BUCKET_LABELS: list[str] = ["0", "5", "10", "15", "30", "60", "60+"]
 
+WAIT_TIME_BUCKETS: list[tuple[str, int]] = [
+    ("p25",  1),
+    ("p50",  3),
+    ("p75",  5),
+    ("p90",  6),
+    ("p95",  10),
+    ("p99",  30),
+]
+
+WAIT_WEIGHTS: float = float(sum(w for _, w in WAIT_TIME_BUCKETS))
+
 PERCENTILE_NAMES: list[str] = ["p25", "p50", "p75", "p90", "p95", "p99"]
 
 EV_METRIC_WEIGHTS = {
@@ -154,8 +165,10 @@ def compute_ev_scores(run_id: str, output_root: Path) -> EVScores:
         .with_columns([
             *[wait_score(f"wait_p{name[1:]}").alias(f"wait_score_{name}") for name in PERCENTILE_NAMES]
         ]).with_columns([
-            pl.mean_horizontal([f"wait_score_{name}" for name in PERCENTILE_NAMES])
-              .alias("ev_wait_time_score")
+            pl.sum_horizontal([
+                pl.col(f"wait_score_{name}") * weight
+                for name, weight in WAIT_TIME_BUCKETS
+            ]).alias("ev_wait_time_score") / WAIT_WEIGHTS
         ])
     )
 
