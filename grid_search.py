@@ -27,9 +27,9 @@ ENV_VAR_BY_WEIGHT = {
 }
 
 WEIGHT_RANGES = {
-    "price_sensitivity": (0, 10),
-    "path_deviation": (0, 100),
-    "expected_wait_time": (0, 100),
+    "price_sensitivity": (1, 10),
+    "path_deviation": (1, 100),
+    "expected_wait_time": (1, 100),
 }
 
 RESULT_FIELDNAMES = [
@@ -91,7 +91,25 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=4,
         help="Number of evenly-spaced values per weight axis (e.g. 5 → [0, 0.25, 0.5, 0.75, 1]). "
-             "Total trials = points_per_axis ** 3.",
+             "Total trials = points_per_axis ** (3 - number_of_fixed_axes).",
+    )
+    parser.add_argument(
+        "--fix-price-sensitivity",
+        type=float,
+        default=None,
+        help="If set, pin price_sensitivity to this value and exclude it from the grid.",
+    )
+    parser.add_argument(
+        "--fix-path-deviation",
+        type=float,
+        default=None,
+        help="If set, pin path_deviation to this value and exclude it from the grid.",
+    )
+    parser.add_argument(
+        "--fix-expected-wait-time",
+        type=float,
+        default=None,
+        help="If set, pin expected_wait_time to this value and exclude it from the grid.",
     )
     parser.add_argument(
         "--session-dir",
@@ -137,11 +155,26 @@ def resolve_path(path: Path, *, must_be: str = "file") -> Path:
     return path
 
 
-def build_grid(points_per_axis: int) -> list[dict[str, float]]:
+def build_grid(
+    points_per_axis: int,
+    fixed: dict[str, float] | None = None,
+) -> list[dict[str, float]]:
     if points_per_axis < 2:
         raise ValueError("--points-per-axis must be >= 2")
 
-    keys = list(ENV_VAR_BY_WEIGHT)
+    fixed = fixed or {}
+
+    for key, value in fixed.items():
+        if key not in ENV_VAR_BY_WEIGHT:
+            raise ValueError(f"Unknown fixed weight: {key}")
+        lo, hi = WEIGHT_RANGES[key]
+        if not (lo <= value <= hi):
+            print(f"  Warning: fixed {key}={value} is outside expected range [{lo}, {hi}]")
+
+    keys = [k for k in ENV_VAR_BY_WEIGHT if k not in fixed]
+    if not keys:
+        return [dict(fixed)]
+
     axes = []
     for key in keys:
         lo, hi = WEIGHT_RANGES[key]
@@ -149,7 +182,7 @@ def build_grid(points_per_axis: int) -> list[dict[str, float]]:
         axes.append([lo + i * step for i in range(points_per_axis)])
 
     return [
-        dict(zip(keys, combo))
+        {**dict(zip(keys, combo)), **fixed}
         for combo in itertools.product(*axes)
     ]
 
@@ -370,12 +403,23 @@ def run_trial(
     )
 
 
+def collect_fixed_weights(args: argparse.Namespace) -> dict[str, float]:
+    fixed: dict[str, float] = {}
+    if args.fix_price_sensitivity is not None:
+        fixed["price_sensitivity"] = args.fix_price_sensitivity
+    if args.fix_path_deviation is not None:
+        fixed["path_deviation"] = args.fix_path_deviation
+    if args.fix_expected_wait_time is not None:
+        fixed["expected_wait_time"] = args.fix_expected_wait_time
+    return fixed
+
+
 def main() -> None:
     os.chdir(PROJECT_ROOT)
     args = parse_args()
 
     headless_project = resolve_path(args.headless_project, must_be="file")
-    
+
     # Use existing dir if provided, otherwise create a new one
     if args.session_dir:
         session_dir = resolve_path(args.session_dir, must_be="dir")
@@ -386,7 +430,6 @@ def main() -> None:
 
     if args.results_file is None:
         results_path = session_dir / "grid_search_results.csv"
-
     else:
         results_path = args.results_file if args.results_file.is_absolute() else (PROJECT_ROOT / args.results_file).resolve()
 
@@ -400,7 +443,8 @@ def main() -> None:
         "DISABLE_FILE_LOGGING": "false"
     }
 
-    all_weights = build_grid(args.points_per_axis)
+    fixed_weights = collect_fixed_weights(args)
+    all_weights = build_grid(args.points_per_axis, fixed=fixed_weights)
     total = len(all_weights)
 
     print(f"Running {total} trials")
@@ -408,8 +452,11 @@ def main() -> None:
     print(f"Perkuet root     : {perkuet_root}")
     print(f"Session dir      : {session_dir}")
     print(f"Results CSV      : {results_path}")
+    if fixed_weights:
+        fixed_summary = ", ".join(f"{k}={v}" for k, v in fixed_weights.items())
+        print(f"Fixed weights    : {fixed_summary}")
 
-    skip_count = args.start_iteration - 1 
+    skip_count = args.start_iteration - 1
 
     try:
         for iteration, weights in enumerate(all_weights[skip_count:], start=args.start_iteration):
