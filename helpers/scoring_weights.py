@@ -14,9 +14,9 @@ PATH_DEVIATION_BUCKETS: list[tuple[float, int]] = [
     (5, 0),
     (10, 0),
     (15, 2),
-    (30, 6),
-    (60, 12),
-    (float("inf"), 15),
+    (30, 8),
+    (60, 15),
+    (float("inf"), 30),
 ]
 
 PATH_DEVIATION_BUCKET_LABELS: list[str] = ["5", "10", "15", "30", "60", "60+"]
@@ -26,12 +26,12 @@ PATH_DEVIATION_BUCKET_LABELS: list[str] = ["5", "10", "15", "30", "60", "60+"]
 # ─────────────────────────────────────────────────────────────────────────────
 DELTA_ARRIVAL_BUCKETS: list[tuple[float, int]] = [
     (0, 0),
-    (5, 1),
-    (10, 2),
-    (15, 3),
-    (30, 6),
-    (60, 10),
-    (float("inf"), 15),
+    (5, 2),
+    (10, 10),
+    (15, 25),
+    (30, 50),
+    (60, 100),
+    (float("inf"), 250),
 ]
 
 DELTA_ARRIVAL_BUCKET_LABELS: list[str] = ["0", "5", "10", "15", "30", "60", "60+"]
@@ -40,21 +40,21 @@ DELTA_ARRIVAL_BUCKET_LABELS: list[str] = ["0", "5", "10", "15", "30", "60", "60+
 # EV Wait Time Percentile Weights
 # ─────────────────────────────────────────────────────────────────────────────
 WAIT_TIME_BUCKETS: list[tuple[str, int]] = [
-    ("p25", 1),
-    ("p50", 3),
-    ("p75", 5),
-    ("p90", 6),
-    ("p95", 10),
-    ("p99", 30),
+    ("p25", 2),
+    ("p50", 5),
+    ("p75", 10),
+    ("p90", 20),
+    ("p95", 50),
+    ("p99", 100),
 ]
 
 # ─────────────────────────────────────────────────────────────────────────────
 # EV Metric Weights (how much each metric contributes to EV score)
 # ─────────────────────────────────────────────────────────────────────────────
 EV_METRIC_WEIGHTS: dict[str, int] = {
-    "path_deviation": 0,
-    "delta_arrival": 0,
-    "ev_wait_time": 0,
+    "path_deviation": 2,
+    "delta_arrival": 2,
+    "ev_wait_time": 3,
     "missed_deadline": 1,
 }
 
@@ -62,12 +62,12 @@ EV_METRIC_WEIGHTS: dict[str, int] = {
 # Station Expected Wait Time Percentile Weights
 # ─────────────────────────────────────────────────────────────────────────────
 EXPECTED_WAIT_TIME_BUCKETS: list[tuple[str, int]] = [
-    ("p25", 1),
-    ("p50", 3),
-    ("p75", 5),
-    ("p90", 6),
-    ("p95", 10),
-    ("p99", 50),
+    ("p25", 2),
+    ("p50", 5),
+    ("p75", 10),
+    ("p90", 20),
+    ("p95", 50),
+    ("p99", 100),
 ]
 
 # ─────────────────────────────────────────────────────────────────────────────
