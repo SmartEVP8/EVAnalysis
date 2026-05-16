@@ -43,6 +43,8 @@ RESULT_FIELDNAMES = [
     "score_seconds",
     "missed_deadline_aggregate",
     "ev_wait_time_aggregate",
+    "pathdev_aggregate",
+    "deltarrival_aggregate",
     "utilization_aggregate",
     "expected_wait_time_aggregate",
     "ev_aggregate",
@@ -226,6 +228,8 @@ def run_scoring(run_id: str, output_root: Path) -> dict[str, float]:
     return {
         "missed_deadline_aggregate": sim_score.missed_deadline_aggregate,
         "ev_wait_time_aggregate": sim_score.ev_wait_time_aggregate,
+        "pathdev_aggregate": sim_score.path_deviation_aggregate,
+        "deltarrival_aggregate": sim_score.delta_arrival_aggregate,
         "utilization_aggregate": sim_score.utilization_aggregate,
         "expected_wait_time_aggregate": sim_score.expected_wait_aggregate,
         "ev_aggregate": sim_score.ev_weighted_aggregate,
@@ -260,6 +264,8 @@ def build_result_row(
     ev_wait_time_aggregate: float = 0.0,
     utilization_aggregate: float = 0.0,
     expected_wait_time_aggregate: float = 0.0,
+    pathdev_aggregate: float = 0.0,
+    deltarrival_aggregate: float = 0.0,
     ev_aggregate: float = 0.0,
     station_aggregate: float = 0.0,
     overall_score: float = 0.0,
@@ -275,6 +281,8 @@ def build_result_row(
         "score_seconds": f"{score_seconds:.4f}",
         "missed_deadline_aggregate": f"{missed_deadline_aggregate:.6f}",
         "ev_wait_time_aggregate": f"{ev_wait_time_aggregate:.6f}",
+        "pathdev_aggregate": f"{pathdev_aggregate:.6f}",
+        "deltarrival_aggregate": f"{deltarrival_aggregate:.6f}",
         "utilization_aggregate": f"{utilization_aggregate:.6f}",
         "expected_wait_time_aggregate": f"{expected_wait_time_aggregate:.6f}",
         "ev_aggregate": f"{ev_aggregate:.6f}",
@@ -324,6 +332,8 @@ def run_trial(
         f"  Scoring complete ({score_seconds:.2f}s) - "
         f"Missed deadline: {score_values['missed_deadline_aggregate']:.6f}, "
         f"EV wait: {score_values['ev_wait_time_aggregate']:.6f}, "
+        f"Path deviation: {score_values['pathdev_aggregate']:.6f}, "
+        f"Delta arrival: {score_values['deltarrival_aggregate']:.6f}, "
         f"Utilization: {score_values['utilization_aggregate']:.6f}, "
         f"Expected wait: {score_values['expected_wait_time_aggregate']:.6f}, "
         f"EV: {score_values['ev_aggregate']:.6f}, "
@@ -341,6 +351,8 @@ def run_trial(
         score_seconds=score_seconds,
         missed_deadline_aggregate=score_values["missed_deadline_aggregate"],
         ev_wait_time_aggregate=score_values["ev_wait_time_aggregate"],
+        pathdev_aggregate=score_values["pathdev_aggregate"],
+        deltarrival_aggregate=score_values["deltarrival_aggregate"],
         utilization_aggregate=score_values["utilization_aggregate"],
         expected_wait_time_aggregate=score_values["expected_wait_time_aggregate"],
         ev_aggregate=score_values["ev_aggregate"],

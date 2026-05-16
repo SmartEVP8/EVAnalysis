@@ -45,6 +45,8 @@ RESULT_FIELDNAMES = [
     "ev_wait_time_aggregate",
     "utilization_aggregate",
     "expected_wait_time_aggregate",
+    "pathdev_aggregate",
+    "deltarrival_aggregate",
     "ev_aggregate",
     "station_aggregate",
     "overall_score",
@@ -250,6 +252,8 @@ def run_scoring(run_id: str, output_root: Path) -> dict[str, float]:
         "ev_wait_time_aggregate": sim_score.ev_wait_time_aggregate,
         "utilization_aggregate": sim_score.utilization_aggregate,
         "expected_wait_time_aggregate": sim_score.expected_wait_aggregate,
+        "pathdev_aggregate": sim_score.path_deviation_aggregate,
+        "deltarrival_aggregate": sim_score.delta_arrival_aggregate,
         "ev_aggregate": sim_score.ev_weighted_aggregate,
         "station_aggregate": sim_score.station_weighted_aggregate,
         "overall_score": sim_score.overall_aggregate,
@@ -282,6 +286,8 @@ def build_result_row(
     ev_wait_time_aggregate: float = 0.0,
     utilization_aggregate: float = 0.0,
     expected_wait_time_aggregate: float = 0.0,
+    pathdev_aggregate: float = 0.0,
+    deltarrival_aggregate: float = 0.0,
     ev_aggregate: float = 0.0,
     station_aggregate: float = 0.0,
     overall_score: float = 0.0,
@@ -299,6 +305,8 @@ def build_result_row(
         "ev_wait_time_aggregate": f"{ev_wait_time_aggregate:.6f}",
         "utilization_aggregate": f"{utilization_aggregate:.6f}",
         "expected_wait_time_aggregate": f"{expected_wait_time_aggregate:.6f}",
+        "pathdev_aggregate": f"{pathdev_aggregate:.6f}",
+        "deltarrival_aggregate": f"{deltarrival_aggregate:.6f}",
         "ev_aggregate": f"{ev_aggregate:.6f}",
         "station_aggregate": f"{station_aggregate:.6f}",
         "overall_score": f"{overall_score:.6f}",
@@ -347,6 +355,8 @@ def run_trial(
         f"EV wait: {score_values['ev_wait_time_aggregate']:.6f}, "
         f"Utilization: {score_values['utilization_aggregate']:.6f}, "
         f"Expected wait: {score_values['expected_wait_time_aggregate']:.6f}, "
+        f"Path deviation: {score_values['pathdev_aggregate']:.6f}, "
+        f"Delta arrival: {score_values['deltarrival_aggregate']:.6f}, "
         f"EV: {score_values['ev_aggregate']:.6f}, "
         f"Station: {score_values['station_aggregate']:.6f}, "
         f"Overall: {score_values['overall_score']:.6f}"
@@ -364,6 +374,8 @@ def run_trial(
         ev_wait_time_aggregate=score_values["ev_wait_time_aggregate"],
         utilization_aggregate=score_values["utilization_aggregate"],
         expected_wait_time_aggregate=score_values["expected_wait_time_aggregate"],
+        pathdev_aggregate=score_values["pathdev_aggregate"],
+        deltarrival_aggregate=score_values["deltarrival_aggregate"],
         ev_aggregate=score_values["ev_aggregate"],
         station_aggregate=score_values["station_aggregate"],
         overall_score=score_values["overall_score"],
@@ -375,7 +387,7 @@ def main() -> None:
     args = parse_args()
 
     headless_project = resolve_path(args.headless_project, must_be="file")
-    
+
     # Use existing dir if provided, otherwise create a new one
     if args.session_dir:
         session_dir = resolve_path(args.session_dir, must_be="dir")
@@ -409,7 +421,7 @@ def main() -> None:
     print(f"Session dir      : {session_dir}")
     print(f"Results CSV      : {results_path}")
 
-    skip_count = args.start_iteration - 1 
+    skip_count = args.start_iteration - 1
 
     try:
         for iteration, weights in enumerate(all_weights[skip_count:], start=args.start_iteration):
