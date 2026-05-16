@@ -109,8 +109,8 @@ def apply_config(config: dict[str, Any]):
 # Output paths
 # ────────────────────────────────────────────────────────────────────────────
 
-def investigation_dir(session_dir: Path, run_id: str, config_name: str) -> Path:
-    return session_dir / "investigations" / run_id / config_name
+def variance_investigation_dir(session_dir: Path, run_id: str, config_name: str) -> Path:
+    return session_dir / "variance_investigations" / run_id / config_name
 
 
 # ────────────────────────────────────────────────────────────────────────────
@@ -161,12 +161,12 @@ def score_run(run_id: str, config: dict[str, Any], output_root: Path) -> RunResu
 def write_run_outputs(result: RunResult, session_dir: Path) -> None:
     """
     Writes simulation_score.json and simulation_score.parquet for one
-    (run_id, config) pair under {session_dir}/investigations/{run_id}/{config_name}/.
+    (run_id, config) pair under {session_dir}/variance_investigations/{run_id}/{config_name}/.
     """
     if result.score is None:
         return
 
-    out_dir = investigation_dir(session_dir, result.run_id, result.config_name)
+    out_dir = variance_investigation_dir(session_dir, result.run_id, result.config_name)
     out_dir.mkdir(parents=True, exist_ok=True)
 
     result.score.write_json(out_dir / "simulation_score.json")
@@ -243,8 +243,8 @@ def build_comparison_df(results: list[RunResult], configs: list[dict[str, Any]])
 
 
 def write_comparison_parquet(df: pl.DataFrame, session_dir: Path) -> Path:
-    out_path = session_dir / "investigations" / "comparison.parquet"
-    (session_dir / "investigations").mkdir(parents=True, exist_ok=True)
+    out_path = session_dir / "variance_investigations" / "comparison.parquet"
+    (session_dir / "variance_investigations").mkdir(parents=True, exist_ok=True)
     df.write_parquet(out_path)
     print(f"[Investigator] Wrote {out_path}")
     return out_path
@@ -283,91 +283,11 @@ def build_variance_df(df: pl.DataFrame) -> pl.DataFrame:
 
 
 def write_variance_parquet(df: pl.DataFrame, session_dir: Path) -> Path:
-    out_path = session_dir / "investigations" / "variance.parquet"
-    (session_dir / "investigations").mkdir(parents=True, exist_ok=True)
+    out_path = session_dir / "variance_investigations" / "variance.parquet"
+    (session_dir / "variance_investigations").mkdir(parents=True, exist_ok=True)
     df.write_parquet(out_path)
     print(f"[Investigator] Wrote {out_path}")
     return out_path
-
-
-# ────────────────────────────────────────────────────────────────────────────
-# Console report
-# ────────────────────────────────────────────────────────────────────────────
-
-def print_wide_table(df: pl.DataFrame, float_cols: list[str]) -> None:
-    formatted = df.with_columns([pl.col(c).round(4) for c in float_cols if c in df.columns])
-    print(formatted)
-
-
-def print_variance_report(df: pl.DataFrame) -> None:
-    """
-    For each scoring config show cross-run variance on overall_aggregate,
-    a full per-metric breakdown, and a ranking-stability table.
-    """
-    configs = df["config"].unique().sort().to_list()
-    runs    = df["run_id"].unique().sort().to_list()
-
-    sep = "─" * 80
-    print("\n" + sep)
-    print("  VARIANCE INVESTIGATION REPORT")
-    print(sep)
-    print(f"  Runs found : {', '.join(runs)}")
-    print(f"  Configs    : {len(configs)}")
-    print(sep)
-
-    # ── cross-run variance per config ────────────────────────────────────
-    print("\n── Per-Config Cross-Run Variance (overall_aggregate) ──────────────────────\n")
-    summary_rows = []
-    for config_name in configs:
-        scores = df.filter(pl.col("config") == config_name)["overall_aggregate"].drop_nulls()
-        lo  = scores.min() or 0.0
-        hi  = scores.max() or 0.0
-        summary_rows.append({
-            "config": config_name,
-            "min":    round(lo, 4),
-            "max":    round(hi, 4),
-            "range":  round(hi - lo, 4),
-            "mean":   round(scores.mean() or 0.0, 4),
-            "std":    round(scores.std()  or 0.0, 4),
-        })
-
-    print(
-        pl.DataFrame(summary_rows).sort("range", descending=True)
-    )
-
-    # ── detailed scores per config ────────────────────────────────────────
-    display_cols = ["run_id"] + METRIC_COLS
-    print("\n── Detailed Scores Per Config ──────────────────────────────────────────────")
-    for config_name in configs:
-        sub = df.filter(pl.col("config") == config_name).select(
-            [c for c in display_cols if c in df.columns]
-        )
-        print(f"\n  Config: {config_name}")
-        print_wide_table(sub, METRIC_COLS)
-
-    # ── ranking stability ─────────────────────────────────────────────────
-    print("\n── Ranking Stability Across Configs ────────────────────────────────────────")
-    print("  (rank 1 = best overall_aggregate)\n")
-
-    rank_rows: dict[str, dict[str, int]] = {r: {} for r in runs}
-    for config_name in configs:
-        ordered = (
-            df.filter(pl.col("config") == config_name)
-            .sort("overall_aggregate", descending=True)["run_id"]
-            .to_list()
-        )
-        for rank, run_id in enumerate(ordered, start=1):
-            rank_rows[run_id][config_name] = rank
-
-    print(
-        pl.DataFrame([{"run_id": rid, **ranks} for rid, ranks in rank_rows.items()])
-        .sort("run_id")
-    )
-
-    print("\n" + sep)
-    print("TIP: configs with high 'range' drive the most score separation.")
-    print("TIP: stable rankings across configs → weights are not the bottleneck.")
-    print(sep + "\n")
 
 # ────────────────────────────────────────────────────────────────────────────
 # Entry point
@@ -378,7 +298,7 @@ def main() -> None:
 
     run_dirs = sorted(
         p for p in session_dir.iterdir()
-        if p.is_dir() and p.name != "investigations"
+        if p.is_dir() and p.name != "variance_investigations"
     )
 
     if not run_dirs:
@@ -407,8 +327,6 @@ def main() -> None:
 
     variance_df = build_variance_df(comparison_df)
     write_variance_parquet(variance_df, session_dir)
-
-    print_variance_report(comparison_df)
 
 if __name__ == "__main__":
     main()
