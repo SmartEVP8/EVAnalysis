@@ -260,7 +260,7 @@ def build_variance_df(df: pl.DataFrame) -> pl.DataFrame:
         run_id            – the simulation run
         config            – the scoring configuration name
         overall_aggregate – the run's overall score under that config
-        delta_from_baseline – difference vs the same run's baseline score
+        variance_from_baseline – difference vs the same run's baseline score
                               (positive = scored higher than baseline)
 
     Rows where either the config score or the baseline score is null are
@@ -276,7 +276,7 @@ def build_variance_df(df: pl.DataFrame) -> pl.DataFrame:
         .join(baseline, on="run_id", how="left")
         .with_columns(
             (pl.col("overall_aggregate") - pl.col("baseline_aggregate"))
-            .alias("delta_from_baseline")
+            .alias("variance_from_baseline")
         )
         .sort(["run_id", "config"])
     )
