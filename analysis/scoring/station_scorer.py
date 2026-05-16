@@ -13,26 +13,14 @@ from pathlib import Path
 
 import polars as pl
 
+from helpers.scoring_weights import (
+    EXPECTED_WAIT_TIME_BUCKETS,
+    STATION_WAIT_DECAY_MINUTES,
+)
 
 PERCENTILE_NAMES: list[str] = ["p25", "p50", "p75", "p90", "p95", "p99"]
-
-EXPECTED_WAIT_TIME_BUCKETS: list[tuple[str, int]] = [
-    ("p25",  1),
-    ("p50",  3),
-    ("p75",  5),
-    ("p90",  6),
-    ("p95",  10),
-    ("p99",  50),
-]
-
 TOTAL_WAIT_WEIGHT: float = float(sum(w for _, w in EXPECTED_WAIT_TIME_BUCKETS))
-
-STATION_METRIC_WEIGHTS = {
-    "utilization": 1,
-    "expected_wait_time": 3,
-}
-
-WAIT_DECAY_MINUTES: float = 45.0
+WAIT_DECAY_MINUTES: float = STATION_WAIT_DECAY_MINUTES
 
 
 def expected_wait_score(wait_time_column: str) -> pl.Expr:
