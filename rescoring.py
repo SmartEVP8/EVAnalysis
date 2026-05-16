@@ -16,9 +16,7 @@ from pathlib import Path
 from analysis.scoring.default_scores import DEFAULT_SCORING_CONFIG, ScoringConfig
 from grid_search import run_scoring
 
-# A run directory is one that contains at least one expected metric file.
-_SENTINEL_FILE = "ArrivalAtDestinationMetric.parquet"
-
+_SENTINEL_FILE = "simulation_score.json" 
 
 def _is_run_dir(path: Path) -> bool:
     return path.is_dir() and (path / _SENTINEL_FILE).exists()
