@@ -14,6 +14,7 @@ from typing import Any
 import polars as pl
 
 from pipeline.run_pipeline import PipelineRunner
+from analysis.scoring.default_scores import ScoringConfig
 from analysis.scoring.simulation_scorer import compute_simulation_score
 
 PROJECT_ROOT = Path(__file__).resolve().parent
@@ -238,12 +239,17 @@ def run_analysis(run_dir: Path, output_root: Path) -> None:
     PipelineRunner(run_dir, output_root=output_root).run_all()
 
 
-def run_scoring(run_id: str, output_root: Path) -> dict[str, float]:
+def run_scoring(
+    run_id: str,
+    output_root: Path,
+    scoring_config: ScoringConfig | None = None,
+) -> dict[str, float]:
     """Compute simulation score and return component and aggregate scores."""
     sim_score = compute_simulation_score(
         run_id=run_id,
         source_path=str(output_root),
         output_root=output_root,
+        scoring_config=scoring_config,
     )
     return {
         "missed_deadline_aggregate": sim_score.missed_deadline_aggregate,

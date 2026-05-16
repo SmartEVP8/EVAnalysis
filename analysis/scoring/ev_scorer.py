@@ -19,47 +19,13 @@ from pathlib import Path
 import polars as pl
 
 from helpers.io_helpers import infer_snapshot_interval_ms
-
-PATH_DEVIATION_BUCKETS: list[tuple[float, int]] = [
-    (5,            0),
-    (10,           0),
-    (15,           2),
-    (30,           6),
-    (60,           12),
-    (float("inf"), 15),
-]
-PATH_DEVIATION_BUCKET_LABELS: list[str] = ["5", "10", "15", "30", "60", "60+"]
-
-DELTA_ARRIVAL_BUCKETS: list[tuple[float, int]] = [
-    (0,            0),
-    (5,            1),
-    (10,           2),
-    (15,           3),
-    (30,           6),
-    (60,           10),
-    (float("inf"), 15),
-]
-DELTA_ARRIVAL_BUCKET_LABELS: list[str] = ["0", "5", "10", "15", "30", "60", "60+"]
-
-WAIT_TIME_BUCKETS: list[tuple[str, int]] = [
-    ("p25",  1),
-    ("p50",  3),
-    ("p75",  5),
-    ("p90",  6),
-    ("p95",  10),
-    ("p99",  30),
-]
-
-WAIT_WEIGHTS: float = float(sum(w for _, w in WAIT_TIME_BUCKETS))
-
-PERCENTILE_NAMES: list[str] = ["p25", "p50", "p75", "p90", "p95", "p99"]
-
-EV_METRIC_WEIGHTS = {
-    "path_deviation": 1,
-    "delta_arrival": 1,
-    "ev_wait_time": 3,
-    "missed_deadline": 2,
-}
+from analysis.scoring.default_scores import (
+    DELTA_ARRIVAL_BUCKETS,
+    PERCENTILE_NAMES,
+    PATH_DEVIATION_BUCKETS,
+    WAIT_TIME_BUCKETS,
+    WAIT_WEIGHTS,
+)
 
 WAIT_DECAY_MINUTES: float = 45.0
 
@@ -121,7 +87,14 @@ def missed_deadline_score() -> list[pl.Expr]:
     ]
 
 
-def compute_ev_scores(run_id: str, output_root: Path) -> EVScores:
+def compute_ev_scores(
+    run_id: str,
+    output_root: Path,
+    *,
+    path_deviation_buckets: list[tuple[float, int]] = PATH_DEVIATION_BUCKETS,
+    delta_arrival_buckets: list[tuple[float, int]] = DELTA_ARRIVAL_BUCKETS,
+    wait_time_buckets: list[tuple[str, int]] = WAIT_TIME_BUCKETS,
+) -> EVScores:
     """
     Computes per-snapshot EV scores for a simulation run.
 
@@ -133,6 +106,9 @@ def compute_ev_scores(run_id: str, output_root: Path) -> EVScores:
     Args:
         run_id: Simulation run identifier (e.g. 'Run_001').
         output_root: Root directory containing all run output.
+        path_deviation_buckets: Bucket definitions for path deviation scoring.
+        delta_arrival_buckets: Bucket definitions for delta arrival scoring.
+        wait_time_buckets: Percentile weights for EV wait scoring.
 
     Returns:
         EVScores with per-snapshot DataFrame only.
@@ -154,8 +130,8 @@ def compute_ev_scores(run_id: str, output_root: Path) -> EVScores:
         ])
         .group_by("simtime_ms")
         .agg([
-            bucket_score("path_deviation_minutes", PATH_DEVIATION_BUCKETS),
-            bucket_score("delta_arrival_minutes",  DELTA_ARRIVAL_BUCKETS),
+            bucket_score("path_deviation_minutes", path_deviation_buckets),
+            bucket_score("delta_arrival_minutes", delta_arrival_buckets),
             *missed_deadline_score(),
         ])
     )
@@ -167,7 +143,7 @@ def compute_ev_scores(run_id: str, output_root: Path) -> EVScores:
         ]).with_columns([
             pl.sum_horizontal([
                 pl.col(f"wait_score_{name}") * weight
-                for name, weight in WAIT_TIME_BUCKETS
+                for name, weight in wait_time_buckets
             ]).alias("ev_wait_time_score") / WAIT_WEIGHTS
         ])
     )

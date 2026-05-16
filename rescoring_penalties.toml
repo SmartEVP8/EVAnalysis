@@ -1,0 +1,77 @@
+[ev_metric_weights]
+path_deviation = 1
+delta_arrival = 3
+ev_wait_time = 5
+missed_deadline = 2
+
+[group_weights]
+ev = 2
+station = 1
+
+[[path_deviation_buckets]]
+upper = 5
+weight = 0
+
+[[path_deviation_buckets]]
+upper = 15
+weight = 2
+
+[[path_deviation_buckets]]
+upper = 30
+weight = 6
+
+[[path_deviation_buckets]]
+upper = 60
+weight = 12
+
+[[path_deviation_buckets]]
+upper = "inf"
+weight = 15
+
+[[wait_time_buckets]]
+percentile = "p25"
+weight = 1
+
+[[wait_time_buckets]]
+percentile = "p50"
+weight = 3
+
+[[wait_time_buckets]]
+percentile = "p75"
+weight = 5
+
+[[wait_time_buckets]]
+percentile = "p90"
+weight = 6
+
+[[wait_time_buckets]]
+percentile = "p95"
+weight = 10
+
+[[wait_time_buckets]]
+percentile = "p99"
+weight = 30
+
+[[expected_wait_time_buckets]]
+percentile = "p25"
+weight = 1
+
+[[expected_wait_time_buckets]]
+percentile = "p50"
+weight = 3
+
+[[expected_wait_time_buckets]]
+percentile = "p75"
+weight = 5
+
+[[expected_wait_time_buckets]]
+percentile = "p90"
+weight = 6
+
+[[expected_wait_time_buckets]]
+percentile = "p95"
+weight = 10
+
+[[expected_wait_time_buckets]]
+percentile = "p99"
+weight = 50

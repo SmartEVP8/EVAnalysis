@@ -13,24 +13,11 @@ from pathlib import Path
 
 import polars as pl
 
-
-PERCENTILE_NAMES: list[str] = ["p25", "p50", "p75", "p90", "p95", "p99"]
-
-EXPECTED_WAIT_TIME_BUCKETS: list[tuple[str, int]] = [
-    ("p25",  1),
-    ("p50",  3),
-    ("p75",  5),
-    ("p90",  6),
-    ("p95",  10),
-    ("p99",  50),
-]
-
-TOTAL_WAIT_WEIGHT: float = float(sum(w for _, w in EXPECTED_WAIT_TIME_BUCKETS))
-
-STATION_METRIC_WEIGHTS = {
-    "utilization": 1,
-    "expected_wait_time": 3,
-}
+from analysis.scoring.default_scores import (
+    EXPECTED_WAIT_TIME_BUCKETS,
+    PERCENTILE_NAMES,
+    TOTAL_WAIT_WEIGHT,
+)
 
 WAIT_DECAY_MINUTES: float = 45.0
 
@@ -52,7 +39,12 @@ def utilization_score(utilization_column: str) -> pl.Expr:
     return pl.col(utilization_column).clip(0.0, 1.0)
 
 
-def compute_station_scores(run_id: str, output_root: Path) -> StationScores:
+def compute_station_scores(
+    run_id: str,
+    output_root: Path,
+    *,
+    expected_wait_time_buckets: list[tuple[str, int]] = EXPECTED_WAIT_TIME_BUCKETS,
+) -> StationScores:
     snapshots_path = output_root / run_id / "percentiles" / "station" / "station_percentiles.parquet"
     snapshots = pl.read_parquet(snapshots_path)
 
@@ -66,7 +58,7 @@ def compute_station_scores(run_id: str, output_root: Path) -> StationScores:
     ]).with_columns([
         pl.sum_horizontal([
             pl.col(f"wait_score_{name}") * weight
-            for name, weight in EXPECTED_WAIT_TIME_BUCKETS
+            for name, weight in expected_wait_time_buckets
         ]).alias("expected_wait_score") / TOTAL_WAIT_WEIGHT
     ])
 
