@@ -13,33 +13,30 @@ from datetime import datetime, timedelta
 import polars as pl
 
 from helpers.constants import OUTPUT_ROOT
-from analysis.scoring.ev_scorer import (
-    EVScores,
-    EV_METRIC_WEIGHTS,
-    PATH_DEVIATION_BUCKET_LABELS,
-    PATH_DEVIATION_BUCKETS,
+from helpers.scoring_weights import (
     DELTA_ARRIVAL_BUCKET_LABELS,
     DELTA_ARRIVAL_BUCKETS,
+    EXPECTED_WAIT_TIME_BUCKETS,
+    EV_METRIC_WEIGHTS,
+    GROUP_WEIGHTS,
+    PATH_DEVIATION_BUCKET_LABELS,
+    PATH_DEVIATION_BUCKETS,
+    STATION_METRIC_WEIGHTS,
     WAIT_TIME_BUCKETS,
+    WARMUP_MS,
+)
+from analysis.scoring.ev_scorer import (
+    EVScores,
     compute_ev_scores,
 )
 from analysis.scoring.station_scorer import (
     StationScores,
-    STATION_METRIC_WEIGHTS,
-    EXPECTED_WAIT_TIME_BUCKETS,
     compute_station_scores,
 )
-
-GROUP_WEIGHTS: dict[str, int] = {
-    "ev": 1,
-    "station": 1,
-}
 
 TOTAL_GROUP_WEIGHT: int = sum(GROUP_WEIGHTS.values())
 
 SIM_EPOCH = datetime(2024, 1, 1, 0, 0, 0)
-
-WARMUP_MS: int = (3 * 60 * 60 * 1000) - 1200000  # 3 hours minus 20 minutes to exclude the initial ramp-up and ramp-down periods
 
 
 def simtime_ms_to_label(simtime_ms: int) -> str:
