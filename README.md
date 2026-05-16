@@ -6,7 +6,7 @@ Install uv: https://docs.astral.sh/uv/getting-started/installation/ , or through
 
 Then:
 ```bash
-cd SmartEVAnalysis
+cd EVAnalysis
 uv sync
 ```
 

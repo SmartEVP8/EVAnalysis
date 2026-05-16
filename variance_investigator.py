@@ -1,21 +1,19 @@
 """
 variance_investigator.py
 
-Scores every run found under OUTPUT_ROOT/runs/ against a set of scoring
-configurations, then prints a variance report so you can see whether the
-scoring system meaningfully differentiates between simulation runs.
+Finds the most recently modified session directory under runs/search_sessions/,
+scores every run found there against a set of scoring configurations, then prints
+a variance report to see whether the scoring system meaningfully
+differentiates between simulation runs.
 
-Usage
+How to run
 -----
-    python variance_investigator.py
+    uv run variance_investigator.py
 
 Each "scoring configuration" is a dict that can override any combination of:
     - EV_METRIC_WEIGHTS        (dict[str, int])
     - STATION_METRIC_WEIGHTS   (dict[str, int])
     - GROUP_WEIGHTS            (dict[str, int])
-
-Decay constants (EV_WAIT_DECAY_MINUTES / ST_WAIT_DECAY_MINUTES) are never
-overridden — they stay at whatever value is set in the scorer modules.
 
 Add or remove entries in SCORING_CONFIGS to explore the space.
 """
@@ -30,9 +28,10 @@ from typing import Any
 
 import polars as pl
 
-# ── locate the project root (the directory that contains this file) ──────────
 ROOT = Path(__file__).parent
-OUTPUT_ROOT = ROOT / "runs"   # adjust if your runs live elsewhere
+RUNS_ROOT = ROOT / "runs" / "search_sessions"
+
+WARMUP_MS: int = (3 * 60 * 60 * 1000) - 1200000  # 3 hours minus 20 minutes to exclude the initial ramp-up and ramp-down periods
 
 # ── import the modules we're going to monkeypatch ───────────────────────────
 import analysis.scoring.ev_scorer as ev_mod
@@ -40,6 +39,21 @@ import analysis.scoring.station_scorer as st_mod
 import analysis.scoring.simulation_scorer as sim_mod
 
 from helpers.variance_configs import SCORING_CONFIGS
+
+# ────────────────────────────────────────────────────────────────────────────
+# Session discovery
+# ────────────────────────────────────────────────────────────────────────────
+
+def find_latest_session() -> Path:
+    sessions = sorted(
+        (p for p in RUNS_ROOT.iterdir() if p.is_dir()),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+    if not sessions:
+        raise FileNotFoundError(f"No session directories found under {RUNS_ROOT}")
+    return sessions[0]
+
 
 # ────────────────────────────────────────────────────────────────────────────
 # Monkeypatching helpers
@@ -93,11 +107,8 @@ def apply_config(cfg: dict[str, Any]):
 # Output paths
 # ────────────────────────────────────────────────────────────────────────────
 
-INVESTIGATIONS_ROOT = ROOT / "investigations"
-
-
-def investigation_dir(run_id: str, config_name: str) -> Path:
-    return INVESTIGATIONS_ROOT / run_id / config_name
+def investigation_dir(session_dir: Path, run_id: str, config_name: str) -> Path:
+    return session_dir / "investigations" / run_id / config_name
 
 
 # ────────────────────────────────────────────────────────────────────────────
@@ -112,7 +123,7 @@ class RunResult:
     error: str | None = None
 
 
-def score_run(run_id: str, cfg: dict[str, Any]) -> RunResult:
+def score_run(run_id: str, cfg: dict[str, Any], output_root: Path) -> RunResult:
     """
     Scores a single run under a single config.
 
@@ -121,11 +132,11 @@ def score_run(run_id: str, cfg: dict[str, Any]) -> RunResult:
     """
     try:
         with apply_config(cfg):
-            ev_scores      = sim_mod.compute_ev_scores(run_id, OUTPUT_ROOT)
-            station_scores = sim_mod.compute_station_scores(run_id, OUTPUT_ROOT)
+            ev_scores      = sim_mod.compute_ev_scores(run_id, output_root)
+            station_scores = sim_mod.compute_station_scores(run_id, output_root)
             score = sim_mod.SimulationScore(
                 run_id=run_id,
-                source_path=str(OUTPUT_ROOT / run_id),
+                source_path=str(output_root / run_id),
                 ev_scores=ev_scores,
                 station_scores=station_scores,
             )
@@ -139,15 +150,15 @@ def score_run(run_id: str, cfg: dict[str, Any]) -> RunResult:
 # Per-run output writing
 # ────────────────────────────────────────────────────────────────────────────
 
-def write_run_outputs(result: RunResult) -> None:
+def write_run_outputs(result: RunResult, session_dir: Path) -> None:
     """
     Writes simulation_score.json and simulation_score.parquet for one
-    (run_id, config) pair under investigations/{run_id}/{config_name}/.
+    (run_id, config) pair under {session_dir}/investigations/{run_id}/{config_name}/.
     """
     if result.score is None:
         return
 
-    out_dir = investigation_dir(result.run_id, result.config_name)
+    out_dir = investigation_dir(session_dir, result.run_id, result.config_name)
     out_dir.mkdir(parents=True, exist_ok=True)
 
     result.score.write_json(out_dir / "simulation_score.json")
@@ -184,7 +195,6 @@ def result_to_flat_row(result: RunResult, cfg: dict[str, Any]) -> dict:
         "run_id": result.run_id,
         "config": result.config_name,
         "error":  result.error or "",
-        # Config parameters (handy for grouping/filtering in analysis tools)
         "cfg_ev_weight_path_deviation":  ev_weights.get("path_deviation"),
         "cfg_ev_weight_delta_arrival":   ev_weights.get("delta_arrival"),
         "cfg_ev_weight_ev_wait_time":    ev_weights.get("ev_wait_time"),
@@ -224,9 +234,9 @@ def build_comparison_df(results: list[RunResult], configs: list[dict[str, Any]])
     ])
 
 
-def write_comparison_parquet(df: pl.DataFrame) -> Path:
-    out_path = INVESTIGATIONS_ROOT / "comparison.parquet"
-    INVESTIGATIONS_ROOT.mkdir(parents=True, exist_ok=True)
+def write_comparison_parquet(df: pl.DataFrame, session_dir: Path) -> Path:
+    out_path = session_dir / "investigations" / "comparison.parquet"
+    (session_dir / "investigations").mkdir(parents=True, exist_ok=True)
     df.write_parquet(out_path)
     print(f"[Investigator] Wrote {out_path}")
     return out_path
@@ -264,9 +274,9 @@ def build_variance_df(df: pl.DataFrame) -> pl.DataFrame:
     )
 
 
-def write_variance_parquet(df: pl.DataFrame) -> Path:
-    out_path = INVESTIGATIONS_ROOT / "variance.parquet"
-    INVESTIGATIONS_ROOT.mkdir(parents=True, exist_ok=True)
+def write_variance_parquet(df: pl.DataFrame, session_dir: Path) -> Path:
+    out_path = session_dir / "investigations" / "variance.parquet"
+    (session_dir / "investigations").mkdir(parents=True, exist_ok=True)
     df.write_parquet(out_path)
     print(f"[Investigator] Wrote {out_path}")
     return out_path
@@ -356,10 +366,16 @@ def print_variance_report(df: pl.DataFrame) -> None:
 # ────────────────────────────────────────────────────────────────────────────
 
 def main() -> None:
-    run_dirs = sorted(p for p in OUTPUT_ROOT.iterdir() if p.is_dir())
+    session_dir = find_latest_session()
+    print(f"Session: {session_dir}")
+
+    run_dirs = sorted(
+        p for p in session_dir.iterdir()
+        if p.is_dir() and p.name != "investigations"
+    )
 
     if not run_dirs:
-        print(f"No run directories found under {OUTPUT_ROOT}. Exiting.")
+        print(f"No run directories found under {session_dir}. Exiting.")
         return
 
     run_ids = [p.name for p in run_dirs]
@@ -370,15 +386,15 @@ def main() -> None:
     for run_id in run_ids:
         for cfg in SCORING_CONFIGS:
             print(f"  Scoring {run_id} / '{cfg['name']}'...")
-            result = score_run(run_id, cfg)
+            result = score_run(run_id, cfg, output_root=session_dir)
             results.append(result)
-            write_run_outputs(result)
+            write_run_outputs(result, session_dir)
 
     comparison_df = build_comparison_df(results, SCORING_CONFIGS)
-    write_comparison_parquet(comparison_df)
+    write_comparison_parquet(comparison_df, session_dir)
 
     variance_df = build_variance_df(comparison_df)
-    write_variance_parquet(variance_df)
+    write_variance_parquet(variance_df, session_dir)
 
     print_variance_report(comparison_df)
 
