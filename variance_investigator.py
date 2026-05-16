@@ -369,6 +369,10 @@ def main() -> None:
     comparison_df = build_comparison_df(results, SCORING_CONFIGS)
     write_comparison_parquet(comparison_df, session_dir)
 
+    scores_with_data = [r for r in results if r.score is not None]
+    print(f"Results with score data: {len(scores_with_data)} / {len(results)}")
+    print(f"Example per_snapshot shape: {scores_with_data[0].score.per_snapshot.shape if scores_with_data else 'N/A'}")
+
     variance_df = build_variance_df(results, SCORING_CONFIGS)
     write_variance_parquet(variance_df, session_dir)
 
