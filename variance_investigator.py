@@ -369,7 +369,7 @@ def main() -> None:
     comparison_df = build_comparison_df(results, SCORING_CONFIGS)
     write_comparison_parquet(comparison_df, session_dir)
 
-    variance_df = build_variance_df(comparison_df)
+    variance_df = build_variance_df(results, SCORING_CONFIGS)
     write_variance_parquet(variance_df, session_dir)
 
 if __name__ == "__main__":
