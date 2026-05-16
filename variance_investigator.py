@@ -184,7 +184,7 @@ def write_run_outputs(result: RunResult, session_dir: Path) -> None:
 
 
 # ────────────────────────────────────────────────────────────────────────────
-# Comparison parquet
+# Comparison
 # ────────────────────────────────────────────────────────────────────────────
 
 METRIC_COLS = [
@@ -249,16 +249,16 @@ def build_comparison_df(results: list[RunResult], configs: list[dict[str, Any]])
     return pl.DataFrame(rows)
 
 
-def write_comparison_parquet(df: pl.DataFrame, session_dir: Path) -> Path:
-    out_path = session_dir / "variance_investigations" / "comparison.parquet"
+def write_comparison_csv(df: pl.DataFrame, session_dir: Path) -> Path:
+    out_path = session_dir / "variance_investigations" / "comparison.csv"
     (session_dir / "variance_investigations").mkdir(parents=True, exist_ok=True)
-    df.write_parquet(out_path)
+    df.write_csv(out_path)
     print(f"[Investigator] Wrote {out_path}")
     return out_path
 
 
 # ────────────────────────────────────────────────────────────────────────────
-# Variance parquet
+# Variance
 # ────────────────────────────────────────────────────────────────────────────
 
 def build_variance_df(
@@ -326,10 +326,10 @@ def build_variance_df(
     return pl.DataFrame(rows)
 
 
-def write_variance_parquet(df: pl.DataFrame, session_dir: Path) -> Path:
-    out_path = session_dir / "variance_investigations" / "variance.parquet"
+def write_variance_csv(df: pl.DataFrame, session_dir: Path) -> Path:
+    out_path = session_dir / "variance_investigations" / "variance.csv"
     (session_dir / "variance_investigations").mkdir(parents=True, exist_ok=True)
-    df.write_parquet(out_path)
+    df.write_csv(out_path)
     print(f"[Investigator] Wrote {out_path}")
     return out_path
 
@@ -367,14 +367,14 @@ def main() -> None:
             results.append(future.result())
 
     comparison_df = build_comparison_df(results, SCORING_CONFIGS)
-    write_comparison_parquet(comparison_df, session_dir)
+    write_comparison_csv(comparison_df, session_dir)
 
     scores_with_data = [r for r in results if r.score is not None]
     print(f"Results with score data: {len(scores_with_data)} / {len(results)}")
     print(f"Example per_snapshot shape: {scores_with_data[0].score.per_snapshot.shape if scores_with_data else 'N/A'}")
 
     variance_df = build_variance_df(results, SCORING_CONFIGS)
-    write_variance_parquet(variance_df, session_dir)
+    write_variance_csv(variance_df, session_dir)
 
 if __name__ == "__main__":
     main()
