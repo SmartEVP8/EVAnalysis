@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import contextlib
 import copy
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -37,6 +37,8 @@ WARMUP_MS: int = (3 * 60 * 60 * 1000) - 1200000  # 3 hours minus 20 minutes to e
 import analysis.scoring.ev_scorer as ev_mod
 import analysis.scoring.station_scorer as st_mod
 import analysis.scoring.simulation_scorer as sim_mod
+
+from concurrent.futures import ProcessPoolExecutor, as_completed
 
 from helpers.variance_configs import SCORING_CONFIGS
 
@@ -60,7 +62,7 @@ def find_latest_session() -> Path:
 # ────────────────────────────────────────────────────────────────────────────
 
 @contextlib.contextmanager
-def apply_config(cfg: dict[str, Any]):
+def apply_config(config: dict[str, Any]):
     """
     Temporarily overrides module-level weight constants in the three scorer
     modules, runs the body of the `with` block, then restores the originals.
@@ -76,17 +78,17 @@ def apply_config(cfg: dict[str, Any]):
     }
 
     try:
-        if "EV_METRIC_WEIGHTS" in cfg:
+        if "EV_METRIC_WEIGHTS" in config:
             ev_mod.EV_METRIC_WEIGHTS.clear()
-            ev_mod.EV_METRIC_WEIGHTS.update(cfg["EV_METRIC_WEIGHTS"])
+            ev_mod.EV_METRIC_WEIGHTS.update(config["EV_METRIC_WEIGHTS"])
 
-        if "STATION_METRIC_WEIGHTS" in cfg:
+        if "STATION_METRIC_WEIGHTS" in config:
             st_mod.STATION_METRIC_WEIGHTS.clear()
-            st_mod.STATION_METRIC_WEIGHTS.update(cfg["STATION_METRIC_WEIGHTS"])
+            st_mod.STATION_METRIC_WEIGHTS.update(config["STATION_METRIC_WEIGHTS"])
 
-        if "GROUP_WEIGHTS" in cfg:
+        if "GROUP_WEIGHTS" in config:
             sim_mod.GROUP_WEIGHTS.clear()
-            sim_mod.GROUP_WEIGHTS.update(cfg["GROUP_WEIGHTS"])
+            sim_mod.GROUP_WEIGHTS.update(config["GROUP_WEIGHTS"])
             sim_mod.TOTAL_GROUP_WEIGHT = sum(sim_mod.GROUP_WEIGHTS.values())
 
         yield
@@ -122,8 +124,14 @@ class RunResult:
     score: sim_mod.SimulationScore | None = None
     error: str | None = None
 
+def score_and_write(run_id: str, config: dict, session_dir: Path) -> RunResult:
+    """Top-level function so it's picklable for multiprocessing."""
+    result = score_run(run_id, config, output_root=session_dir)
+    write_run_outputs(result, session_dir)
+    return result
 
-def score_run(run_id: str, cfg: dict[str, Any], output_root: Path) -> RunResult:
+
+def score_run(run_id: str, config: dict[str, Any], output_root: Path) -> RunResult:
     """
     Scores a single run under a single config.
 
@@ -131,7 +139,7 @@ def score_run(run_id: str, cfg: dict[str, Any], output_root: Path) -> RunResult:
     can write whatever outputs they need from it.
     """
     try:
-        with apply_config(cfg):
+        with apply_config(config):
             ev_scores      = sim_mod.compute_ev_scores(run_id, output_root)
             station_scores = sim_mod.compute_station_scores(run_id, output_root)
             score = sim_mod.SimulationScore(
@@ -140,10 +148,10 @@ def score_run(run_id: str, cfg: dict[str, Any], output_root: Path) -> RunResult:
                 ev_scores=ev_scores,
                 station_scores=station_scores,
             )
-        return RunResult(run_id=run_id, config_name=cfg["name"], score=score)
+        return RunResult(run_id=run_id, config_name=config["name"], score=score)
     except Exception as exc:  # noqa: BLE001
-        print(f"  [!] {run_id} / {cfg['name']}: {exc}")
-        return RunResult(run_id=run_id, config_name=cfg["name"], error=str(exc))
+        print(f"  [!] {run_id} / {config['name']}: {exc}")
+        return RunResult(run_id=run_id, config_name=config["name"], error=str(exc))
 
 
 # ────────────────────────────────────────────────────────────────────────────
@@ -182,27 +190,27 @@ METRIC_COLS = [
 ]
 
 
-def result_to_flat_row(result: RunResult, cfg: dict[str, Any]) -> dict:
+def result_to_flat_row(result: RunResult, config: dict[str, Any]) -> dict:
     """
     Flattens a RunResult into a single dict row for the comparison parquet.
     Mirrors the structure of simulation_score.json so nothing is lost.
     """
-    ev_weights  = cfg.get("EV_METRIC_WEIGHTS", {})
-    st_weights  = cfg.get("STATION_METRIC_WEIGHTS", {})
-    grp_weights = cfg.get("GROUP_WEIGHTS", {})
+    ev_weights  = config.get("EV_METRIC_WEIGHTS", {})
+    st_weights  = config.get("STATION_METRIC_WEIGHTS", {})
+    grp_weights = config.get("GROUP_WEIGHTS", {})
 
     row: dict = {
         "run_id": result.run_id,
         "config": result.config_name,
         "error":  result.error or "",
-        "cfg_ev_weight_path_deviation":  ev_weights.get("path_deviation"),
-        "cfg_ev_weight_delta_arrival":   ev_weights.get("delta_arrival"),
-        "cfg_ev_weight_ev_wait_time":    ev_weights.get("ev_wait_time"),
-        "cfg_ev_weight_missed_deadline": ev_weights.get("missed_deadline"),
-        "cfg_st_weight_utilization":     st_weights.get("utilization"),
-        "cfg_st_weight_expected_wait":   st_weights.get("expected_wait_time"),
-        "cfg_group_weight_ev":           grp_weights.get("ev"),
-        "cfg_group_weight_station":      grp_weights.get("station"),
+        "config_ev_weight_path_deviation":  ev_weights.get("path_deviation"),
+        "config_ev_weight_delta_arrival":   ev_weights.get("delta_arrival"),
+        "config_ev_weight_ev_wait_time":    ev_weights.get("ev_wait_time"),
+        "config_ev_weight_missed_deadline": ev_weights.get("missed_deadline"),
+        "config_st_weight_utilization":     st_weights.get("utilization"),
+        "config_st_weight_expected_wait":   st_weights.get("expected_wait_time"),
+        "config_group_weight_ev":           grp_weights.get("ev"),
+        "config_group_weight_station":      grp_weights.get("station"),
     }
 
     if result.score is None:
@@ -227,9 +235,9 @@ def result_to_flat_row(result: RunResult, cfg: dict[str, Any]) -> dict:
 
 def build_comparison_df(results: list[RunResult], configs: list[dict[str, Any]]) -> pl.DataFrame:
     """One row per (run_id, config) with all aggregates and config params."""
-    cfg_by_name = {c["name"]: c for c in configs}
+    config_by_name = {c["name"]: c for c in configs}
     return pl.DataFrame([
-        result_to_flat_row(r, cfg_by_name[r.config_name])
+        result_to_flat_row(r, config_by_name[r.config_name])
         for r in results
     ])
 
@@ -310,12 +318,12 @@ def print_variance_report(df: pl.DataFrame) -> None:
     # ── cross-run variance per config ────────────────────────────────────
     print("\n── Per-Config Cross-Run Variance (overall_aggregate) ──────────────────────\n")
     summary_rows = []
-    for cfg_name in configs:
-        scores = df.filter(pl.col("config") == cfg_name)["overall_aggregate"].drop_nulls()
+    for config_name in configs:
+        scores = df.filter(pl.col("config") == config_name)["overall_aggregate"].drop_nulls()
         lo  = scores.min() or 0.0
         hi  = scores.max() or 0.0
         summary_rows.append({
-            "config": cfg_name,
+            "config": config_name,
             "min":    round(lo, 4),
             "max":    round(hi, 4),
             "range":  round(hi - lo, 4),
@@ -330,11 +338,11 @@ def print_variance_report(df: pl.DataFrame) -> None:
     # ── detailed scores per config ────────────────────────────────────────
     display_cols = ["run_id"] + METRIC_COLS
     print("\n── Detailed Scores Per Config ──────────────────────────────────────────────")
-    for cfg_name in configs:
-        sub = df.filter(pl.col("config") == cfg_name).select(
+    for config_name in configs:
+        sub = df.filter(pl.col("config") == config_name).select(
             [c for c in display_cols if c in df.columns]
         )
-        print(f"\n  Config: {cfg_name}")
+        print(f"\n  Config: {config_name}")
         print_wide_table(sub, METRIC_COLS)
 
     # ── ranking stability ─────────────────────────────────────────────────
@@ -342,14 +350,14 @@ def print_variance_report(df: pl.DataFrame) -> None:
     print("  (rank 1 = best overall_aggregate)\n")
 
     rank_rows: dict[str, dict[str, int]] = {r: {} for r in runs}
-    for cfg_name in configs:
+    for config_name in configs:
         ordered = (
-            df.filter(pl.col("config") == cfg_name)
+            df.filter(pl.col("config") == config_name)
             .sort("overall_aggregate", descending=True)["run_id"]
             .to_list()
         )
         for rank, run_id in enumerate(ordered, start=1):
-            rank_rows[run_id][cfg_name] = rank
+            rank_rows[run_id][config_name] = rank
 
     print(
         pl.DataFrame([{"run_id": rid, **ranks} for rid, ranks in rank_rows.items()])
@@ -364,7 +372,6 @@ def print_variance_report(df: pl.DataFrame) -> None:
 # ────────────────────────────────────────────────────────────────────────────
 # Entry point
 # ────────────────────────────────────────────────────────────────────────────
-
 def main() -> None:
     session_dir = find_latest_session()
     print(f"Session: {session_dir}")
@@ -382,13 +389,18 @@ def main() -> None:
     print(f"Found {len(run_ids)} run(s): {', '.join(run_ids)}")
     print(f"Scoring against {len(SCORING_CONFIGS)} config(s)...\n")
 
+    tasks = [(run_id, config) for run_id in run_ids for config in SCORING_CONFIGS]
     results: list[RunResult] = []
-    for run_id in run_ids:
-        for cfg in SCORING_CONFIGS:
-            print(f"  Scoring {run_id} / '{cfg['name']}'...")
-            result = score_run(run_id, cfg, output_root=session_dir)
-            results.append(result)
-            write_run_outputs(result, session_dir)
+
+    with ProcessPoolExecutor() as executor:
+        futures = {
+            executor.submit(score_and_write, run_id, config, session_dir): (run_id, config["name"])
+            for run_id, config in tasks
+        }
+        for future in as_completed(futures):
+            run_id, config_name = futures[future]
+            print(f"  Done: {run_id} / '{config_name}'")
+            results.append(future.result())
 
     comparison_df = build_comparison_df(results, SCORING_CONFIGS)
     write_comparison_parquet(comparison_df, session_dir)
@@ -397,7 +409,6 @@ def main() -> None:
     write_variance_parquet(variance_df, session_dir)
 
     print_variance_report(comparison_df)
-
 
 if __name__ == "__main__":
     main()
