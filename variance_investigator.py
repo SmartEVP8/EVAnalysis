@@ -31,12 +31,22 @@ import polars as pl
 ROOT = Path(__file__).parent
 RUNS_ROOT = ROOT / "runs" / "search_sessions"
 
-WARMUP_MS: int = (3 * 60 * 60 * 1000) - 1200000  # 3 hours minus 20 minutes to exclude the initial ramp-up and ramp-down periods
+SCORE_METRICS = [
+    "path_deviation_score",
+    "delta_arrival_score",
+    "ev_wait_time_score",
+    "missed_deadline_score",
+    "utilization_score",
+    "expected_wait_score",
+    "ev_weighted_score",
+    "station_weighted_score",
+    "combined_score",
+]
 
 # ── import the modules we're going to monkeypatch ───────────────────────────
 import analysis.scoring.ev_scorer as ev_mod
-import analysis.scoring.station_scorer as st_mod
-import analysis.scoring.simulation_scorer as sim_mod
+import analysis.scoring.station_scorer as station_mod
+import analysis.scoring.simulation_scorer as simulation_mod
 
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
@@ -48,7 +58,7 @@ from helpers.variance_configs import SCORING_CONFIGS
 
 def find_latest_session() -> Path:
     sessions = sorted(
-        (p for p in RUNS_ROOT.iterdir() if p.is_dir()),
+        (path for path in RUNS_ROOT.iterdir() if path.is_dir()),
         key=lambda p: p.stat().st_mtime,
         reverse=True,
     )
@@ -70,11 +80,11 @@ def apply_config(config: dict[str, Any]):
     Decay constants are intentionally never touched here.
     """
     # save originals
-    orig = {
-        "ev_EV_METRIC_WEIGHTS":      copy.deepcopy(ev_mod.EV_METRIC_WEIGHTS),
-        "st_STATION_METRIC_WEIGHTS": copy.deepcopy(st_mod.STATION_METRIC_WEIGHTS),
-        "sim_GROUP_WEIGHTS":         copy.deepcopy(sim_mod.GROUP_WEIGHTS),
-        "sim_TOTAL_GROUP_WEIGHT":    sim_mod.TOTAL_GROUP_WEIGHT,
+    original_weights = {
+        "ev_EV_METRIC_WEIGHTS": copy.deepcopy(ev_mod.EV_METRIC_WEIGHTS),
+        "st_STATION_METRIC_WEIGHTS": copy.deepcopy(station_mod.STATION_METRIC_WEIGHTS),
+        "sim_GROUP_WEIGHTS": copy.deepcopy(simulation_mod.GROUP_WEIGHTS),
+        "sim_TOTAL_GROUP_WEIGHT": simulation_mod.TOTAL_GROUP_WEIGHT,
     }
 
     try:
@@ -83,26 +93,26 @@ def apply_config(config: dict[str, Any]):
             ev_mod.EV_METRIC_WEIGHTS.update(config["EV_METRIC_WEIGHTS"])
 
         if "STATION_METRIC_WEIGHTS" in config:
-            st_mod.STATION_METRIC_WEIGHTS.clear()
-            st_mod.STATION_METRIC_WEIGHTS.update(config["STATION_METRIC_WEIGHTS"])
+            station_mod.STATION_METRIC_WEIGHTS.clear()
+            station_mod.STATION_METRIC_WEIGHTS.update(config["STATION_METRIC_WEIGHTS"])
 
         if "GROUP_WEIGHTS" in config:
-            sim_mod.GROUP_WEIGHTS.clear()
-            sim_mod.GROUP_WEIGHTS.update(config["GROUP_WEIGHTS"])
-            sim_mod.TOTAL_GROUP_WEIGHT = sum(sim_mod.GROUP_WEIGHTS.values())
+            simulation_mod.GROUP_WEIGHTS.clear()
+            simulation_mod.GROUP_WEIGHTS.update(config["GROUP_WEIGHTS"])
+            simulation_mod.TOTAL_GROUP_WEIGHT = sum(simulation_mod.GROUP_WEIGHTS.values())
 
         yield
 
     finally:
         ev_mod.EV_METRIC_WEIGHTS.clear()
-        ev_mod.EV_METRIC_WEIGHTS.update(orig["ev_EV_METRIC_WEIGHTS"])
+        ev_mod.EV_METRIC_WEIGHTS.update(original_weights["ev_EV_METRIC_WEIGHTS"])
 
-        st_mod.STATION_METRIC_WEIGHTS.clear()
-        st_mod.STATION_METRIC_WEIGHTS.update(orig["st_STATION_METRIC_WEIGHTS"])
+        station_mod.STATION_METRIC_WEIGHTS.clear()
+        station_mod.STATION_METRIC_WEIGHTS.update(original_weights["st_STATION_METRIC_WEIGHTS"])
 
-        sim_mod.GROUP_WEIGHTS.clear()
-        sim_mod.GROUP_WEIGHTS.update(orig["sim_GROUP_WEIGHTS"])
-        sim_mod.TOTAL_GROUP_WEIGHT = orig["sim_TOTAL_GROUP_WEIGHT"]
+        simulation_mod.GROUP_WEIGHTS.clear()
+        simulation_mod.GROUP_WEIGHTS.update(original_weights["sim_GROUP_WEIGHTS"])
+        simulation_mod.TOTAL_GROUP_WEIGHT = original_weights["sim_TOTAL_GROUP_WEIGHT"]
 
 
 # ────────────────────────────────────────────────────────────────────────────
@@ -121,7 +131,7 @@ def variance_investigation_dir(session_dir: Path, run_id: str, config_name: str)
 class RunResult:
     run_id: str
     config_name: str
-    score: sim_mod.SimulationScore | None = None
+    score: simulation_mod.SimulationScore | None = None
     error: str | None = None
 
 def score_and_write(run_id: str, config: dict, session_dir: Path) -> RunResult:
@@ -140,16 +150,16 @@ def score_run(run_id: str, config: dict[str, Any], output_root: Path) -> RunResu
     """
     try:
         with apply_config(config):
-            ev_scores      = sim_mod.compute_ev_scores(run_id, output_root)
-            station_scores = sim_mod.compute_station_scores(run_id, output_root)
-            score = sim_mod.SimulationScore(
+            ev_scores      = simulation_mod.compute_ev_scores(run_id, output_root)
+            station_scores = simulation_mod.compute_station_scores(run_id, output_root)
+            score = simulation_mod.SimulationScore(
                 run_id=run_id,
                 source_path=str(output_root / run_id),
                 ev_scores=ev_scores,
                 station_scores=station_scores,
             )
         return RunResult(run_id=run_id, config_name=config["name"], score=score)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         print(f"  [!] {run_id} / {config['name']}: {exc}")
         return RunResult(run_id=run_id, config_name=config["name"], error=str(exc))
 
@@ -190,56 +200,53 @@ METRIC_COLS = [
 ]
 
 
-def result_to_flat_row(result: RunResult, config: dict[str, Any]) -> dict:
-    """
-    Flattens a RunResult into a single dict row for the comparison parquet.
-    Mirrors the structure of simulation_score.json so nothing is lost.
-    """
-    ev_weights  = config.get("EV_METRIC_WEIGHTS", {})
-    st_weights  = config.get("STATION_METRIC_WEIGHTS", {})
-    grp_weights = config.get("GROUP_WEIGHTS", {})
-
-    row: dict = {
-        "run_id": result.run_id,
-        "config": result.config_name,
-        "error":  result.error or "",
-        "config_ev_weight_path_deviation":  ev_weights.get("path_deviation"),
-        "config_ev_weight_delta_arrival":   ev_weights.get("delta_arrival"),
-        "config_ev_weight_ev_wait_time":    ev_weights.get("ev_wait_time"),
-        "config_ev_weight_missed_deadline": ev_weights.get("missed_deadline"),
-        "config_st_weight_utilization":     st_weights.get("utilization"),
-        "config_st_weight_expected_wait":   st_weights.get("expected_wait_time"),
-        "config_group_weight_ev":           grp_weights.get("ev"),
-        "config_group_weight_station":      grp_weights.get("station"),
-    }
-
-    if result.score is None:
-        for col in METRIC_COLS:
-            row[col] = None
-        return row
-
-    s = result.score
-    row.update({
-        "overall_aggregate":          s.overall_aggregate,
-        "ev_weighted_aggregate":      s.ev_weighted_aggregate,
-        "path_deviation_aggregate":   s.path_deviation_aggregate,
-        "delta_arrival_aggregate":    s.delta_arrival_aggregate,
-        "ev_wait_time_aggregate":     s.ev_wait_time_aggregate,
-        "missed_deadline_aggregate":  s.missed_deadline_aggregate,
-        "station_weighted_aggregate": s.station_weighted_aggregate,
-        "utilization_aggregate":      s.utilization_aggregate,
-        "expected_wait_aggregate":    s.expected_wait_aggregate,
-    })
-    return row
-
-
 def build_comparison_df(results: list[RunResult], configs: list[dict[str, Any]]) -> pl.DataFrame:
-    """One row per (run_id, config) with all aggregates and config params."""
+    """
+    One row per (run_id, config) with:
+        - config name + raw weight values
+        - for each metric: min, max, spread (max - min) across snapshots
+    """
     config_by_name = {c["name"]: c for c in configs}
-    return pl.DataFrame([
-        result_to_flat_row(r, config_by_name[r.config_name])
-        for r in results
-    ])
+    rows = []
+
+    for result in results:
+        config = config_by_name[result.config_name]
+        ev_weights  = config.get("EV_METRIC_WEIGHTS", {})
+        station_weights  = config.get("STATION_METRIC_WEIGHTS", {})
+        group_weights = config.get("GROUP_WEIGHTS", {})
+
+        row: dict = {
+            "run_id":  result.run_id,
+            "config":  result.config_name,
+            "error":   result.error or "",
+            "config_ev_weight_path_deviation":  ev_weights.get("path_deviation"),
+            "config_ev_weight_delta_arrival":   ev_weights.get("delta_arrival"),
+            "config_ev_weight_ev_wait_time":    ev_weights.get("ev_wait_time"),
+            "config_ev_weight_missed_deadline": ev_weights.get("missed_deadline"),
+            "config_st_weight_utilization":     station_weights.get("utilization"),
+            "config_st_weight_expected_wait":   station_weights.get("expected_wait_time"),
+            "config_group_weight_ev":           group_weights.get("ev"),
+            "config_group_weight_station":      group_weights.get("station"),
+        }
+
+        if result.score is None:
+            for metric in SCORE_METRICS:
+                row[f"{metric}_min"]    = None
+                row[f"{metric}_max"]    = None
+                row[f"{metric}_spread"] = None
+        else:
+            per_snapshot = result.score.per_snapshot
+            for metric in SCORE_METRICS:
+                column = per_snapshot[metric]
+                lowest = column.min()
+                highest = column.max()
+                row[f"{metric}_min"]    = lowest
+                row[f"{metric}_max"]    = highest
+                row[f"{metric}_spread"] = (highest - lowest) if (highest is not None and lowest is not None) else None
+
+        rows.append(row)
+
+    return pl.DataFrame(rows)
 
 
 def write_comparison_parquet(df: pl.DataFrame, session_dir: Path) -> Path:
@@ -254,32 +261,69 @@ def write_comparison_parquet(df: pl.DataFrame, session_dir: Path) -> Path:
 # Variance parquet
 # ────────────────────────────────────────────────────────────────────────────
 
-def build_variance_df(df: pl.DataFrame) -> pl.DataFrame:
+def build_variance_df(
+    results: list[RunResult],
+    configs: list[dict[str, Any]],
+) -> pl.DataFrame:
     """
-    Produces a tidy table with one row per (run_id, config) containing:
-        run_id            – the simulation run
-        config            – the scoring configuration name
-        overall_aggregate – the run's overall score under that config
-        variance_from_baseline – difference vs the same run's baseline score
-                              (positive = scored higher than baseline)
-
-    Rows where either the config score or the baseline score is null are
-    kept but will have a null delta.
+    One row per (run_id, config, metric) with:
+        - simtime_ms and score of the snapshot with the highest score for that metric
+        - simtime_ms and score of the snapshot with the lowest score for that metric
+        - spread (max_score - min_score)
+        - baseline_spread for that same (run_id, metric)
+        - spread_vs_baseline = spread - baseline_spread
     """
-    baseline = (
-        df.filter(pl.col("config") == "baseline")
-        .select(["run_id", pl.col("overall_aggregate").alias("baseline_aggregate")])
-    )
+    config_by_name = {c["name"]: c for c in configs}
+    result_index: dict[tuple[str, str], RunResult] = {
+        (r.run_id, r.config_name): r for r in results
+    }
 
-    return (
-        df.select(["run_id", "config", "overall_aggregate"])
-        .join(baseline, on="run_id", how="left")
-        .with_columns(
-            (pl.col("overall_aggregate") - pl.col("baseline_aggregate"))
-            .alias("variance_from_baseline")
-        )
-        .sort(["run_id", "config"])
-    )
+    rows = []
+
+    for result in results:
+        if result.score is None:
+            continue
+
+        per_snapshot = result.score.per_snapshot
+        run_id = result.run_id
+        config = result.config_name
+
+        baseline_result = result_index.get((run_id, "baseline"))
+        baseline_per_snapshot = baseline_result.score.per_snapshot if (baseline_result and baseline_result.score) else None
+
+        for metric in SCORE_METRICS:
+            column = per_snapshot[metric]
+            highest  = column.max()
+            lowest  = column.min()
+
+            if highest is None or lowest is None:
+                continue
+
+            max_simtime_ms = per_snapshot.filter(pl.col(metric) == highest)["simtime_ms"][0]
+            min_simtime_ms = per_snapshot.filter(pl.col(metric) == lowest)["simtime_ms"][0]
+            spread = highest - lowest
+
+            baseline_spread: float | None = None
+            if baseline_per_snapshot is not None:
+                baseline_highest = baseline_per_snapshot[metric].max()
+                baseline_lowest = baseline_per_snapshot[metric].min()
+                if baseline_highest is not None and baseline_lowest is not None:
+                    baseline_spread = baseline_highest - baseline_lowest
+
+            rows.append({
+                "run_id":           run_id,
+                "config":           config,
+                "metric":           metric,
+                "max_score":        highest,
+                "max_simtime_ms":   max_simtime_ms,
+                "min_score":        lowest,
+                "min_simtime_ms":   min_simtime_ms,
+                "spread":           spread,
+                "baseline_spread":  baseline_spread,
+                "spread_vs_baseline": (spread - baseline_spread) if baseline_spread is not None else None,
+            })
+
+    return pl.DataFrame(rows)
 
 
 def write_variance_parquet(df: pl.DataFrame, session_dir: Path) -> Path:
@@ -297,15 +341,15 @@ def main() -> None:
     print(f"Session: {session_dir}")
 
     run_dirs = sorted(
-        p for p in session_dir.iterdir()
-        if p.is_dir() and p.name != "variance_investigations"
+        path for path in session_dir.iterdir()
+        if path.is_dir() and path.name != "variance_investigations"
     )
 
     if not run_dirs:
         print(f"No run directories found under {session_dir}. Exiting.")
         return
 
-    run_ids = [p.name for p in run_dirs]
+    run_ids = [path.name for path in run_dirs]
     print(f"Found {len(run_ids)} run(s): {', '.join(run_ids)}")
     print(f"Scoring against {len(SCORING_CONFIGS)} config(s)...\n")
 
