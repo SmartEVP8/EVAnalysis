@@ -48,8 +48,8 @@ import analysis.scoring.ev_scorer as ev_mod
 import analysis.scoring.station_scorer as station_mod
 import analysis.scoring.simulation_scorer as simulation_mod
 
+from analysis.scoring.simulation_scorer import simtime_ms_to_label
 from concurrent.futures import ProcessPoolExecutor, as_completed
-
 from helpers.variance_configs import SCORING_CONFIGS
 
 # ────────────────────────────────────────────────────────────────────────────
@@ -260,22 +260,15 @@ def write_comparison_csv(df: pl.DataFrame, session_dir: Path) -> Path:
 # ────────────────────────────────────────────────────────────────────────────
 # Variance
 # ────────────────────────────────────────────────────────────────────────────
-
 def build_variance_df(
     results: list[RunResult],
-    configs: list[dict[str, Any]],
 ) -> pl.DataFrame:
     """
-    One row per (run_id, config, metric) with:
-        - simtime_ms and score of the snapshot with the highest score for that metric
-        - simtime_ms and score of the snapshot with the lowest score for that metric
-        - spread (max_score - min_score)
-        - baseline_spread for that same (run_id, metric)
-        - spread_vs_baseline = spread - baseline_spread
+    One row per (run_id, config) with min, max, spread, and spread_vs_baseline
+    for each metric as columns.
     """
-    config_by_name = {c["name"]: c for c in configs}
     result_index: dict[tuple[str, str], RunResult] = {
-        (r.run_id, r.config_name): r for r in results
+        (result.run_id, result.config_name): result for result in results
     }
 
     rows = []
@@ -289,39 +282,45 @@ def build_variance_df(
         config = result.config_name
 
         baseline_result = result_index.get((run_id, "baseline"))
-        baseline_per_snapshot = baseline_result.score.per_snapshot if (baseline_result and baseline_result.score) else None
+        baseline_per_snapshot = (
+            baseline_result.score.per_snapshot
+            if (baseline_result and baseline_result.score)
+            else None
+        )
+
+        row: dict = {"run_id": run_id, "config": config}
 
         for metric in SCORE_METRICS:
-            column = per_snapshot[metric]
-            highest  = column.max()
-            lowest  = column.min()
+            highest = per_snapshot[metric].max()
+            lowest = per_snapshot[metric].min()
 
             if highest is None or lowest is None:
                 continue
 
+            spread = highest - lowest
+
             max_simtime_ms = per_snapshot.filter(pl.col(metric) == highest)["simtime_ms"][0]
             min_simtime_ms = per_snapshot.filter(pl.col(metric) == lowest)["simtime_ms"][0]
-            spread = highest - lowest
 
             baseline_spread: float | None = None
             if baseline_per_snapshot is not None:
-                baseline_highest = baseline_per_snapshot[metric].max()
-                baseline_lowest = baseline_per_snapshot[metric].min()
-                if baseline_highest is not None and baseline_lowest is not None:
-                    baseline_spread = baseline_highest - baseline_lowest
+                b_max = baseline_per_snapshot[metric].max()
+                b_min = baseline_per_snapshot[metric].min()
+                if b_max is not None and b_min is not None:
+                    baseline_spread = b_max - b_min
 
-            rows.append({
-                "run_id":           run_id,
-                "config":           config,
-                "metric":           metric,
-                "max_score":        highest,
-                "max_simtime_ms":   max_simtime_ms,
-                "min_score":        lowest,
-                "min_simtime_ms":   min_simtime_ms,
-                "spread":           spread,
-                "baseline_spread":  baseline_spread,
-                "spread_vs_baseline": (spread - baseline_spread) if baseline_spread is not None else None,
-            })
+            row[f"{metric}_max"] = highest
+            row[f"{metric}_max_at"] = simtime_ms_to_label(max_simtime_ms)
+            row[f"{metric}_min"] = lowest
+            row[f"{metric}_min_at"] = simtime_ms_to_label(min_simtime_ms)
+            row[f"{metric}_spread"] = spread
+            row[f"{metric}_spread_vs_baseline"] = (
+                (spread - baseline_spread)
+                if (baseline_spread is not None)
+                else None
+            )
+
+        rows.append(row)
 
     return pl.DataFrame(rows)
 
@@ -373,7 +372,7 @@ def main() -> None:
     print(f"Results with score data: {len(scores_with_data)} / {len(results)}")
     print(f"Example per_snapshot shape: {scores_with_data[0].score.per_snapshot.shape if scores_with_data else 'N/A'}")
 
-    variance_df = build_variance_df(results, SCORING_CONFIGS)
+    variance_df = build_variance_df(results)
     write_variance_csv(variance_df, session_dir)
 
 if __name__ == "__main__":
