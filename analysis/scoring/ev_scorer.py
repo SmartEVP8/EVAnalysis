@@ -20,11 +20,8 @@ import polars as pl
 
 from helpers.io_helpers import infer_snapshot_interval_ms
 from helpers.scoring_weights import (
-    DELTA_ARRIVAL_BUCKET_LABELS,
     DELTA_ARRIVAL_BUCKETS,
-    EV_METRIC_WEIGHTS,
     EV_WAIT_DECAY_MINUTES,
-    PATH_DEVIATION_BUCKET_LABELS,
     PATH_DEVIATION_BUCKETS,
     WAIT_TIME_BUCKETS,
 )
@@ -40,8 +37,9 @@ def bucket_score(col: str, buckets: list[tuple[float, int]]) -> pl.Expr:
     for col within a group.
 
     Each row is assigned the weight of the bucket it falls into. The group score
-    is mean(row_weight) / total_weight, so the score ranges between 0 and 1.
+    is mean(row_weight) / total_bucket_weight, so the score ranges between 0 and 1.
     """
+    max_weight = max(weight for _, weight in buckets)
     previous_upper = float("-inf")
     weight_expr: pl.Expr = pl.lit(None, dtype=pl.Float64)
 
@@ -56,7 +54,7 @@ def bucket_score(col: str, buckets: list[tuple[float, int]]) -> pl.Expr:
         weight_expr = pl.when(bucket_filter).then(pl.lit(float(weight))).otherwise(weight_expr)
         previous_upper = upper_bound
 
-    return (1.0 - weight_expr.sum() / pl.col(col).count()).alias(f"{col}_score")
+    return (1.0 - weight_expr.sum() / (pl.col(col).count() * max_weight)).alias(f"{col}_score")
 
 
 def wait_score(col: str) -> pl.Expr:
