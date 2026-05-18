@@ -27,11 +27,11 @@ PATH_DEVIATION_BUCKET_LABELS: list[str] = ["5", "10", "15", "30", "60", "60+"]
 DELTA_ARRIVAL_BUCKETS: list[tuple[float, int]] = [
     (0, 0),
     (5, 2),
-    (10, 10),
-    (15, 25),
-    (30, 50),
-    (60, 100),
-    (float("inf"), 250),
+    (10, 5),
+    (15, 10),
+    (30, 20),
+    (60, 50),
+    (float("inf"), 100),
 ]
 
 DELTA_ARRIVAL_BUCKET_LABELS: list[str] = ["0", "5", "10", "15", "30", "60", "60+"]
