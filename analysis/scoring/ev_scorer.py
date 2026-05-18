@@ -53,7 +53,7 @@ def bucket_score(col: str, buckets: list[tuple[float, int]]) -> pl.Expr:
 
         weight_expr = pl.when(bucket_filter).then(pl.lit(float(weight))).otherwise(weight_expr)
         previous_upper = upper_bound
-        
+
     return (1.0 - weight_expr.sum() / (pl.col(col).count() * max_weight)).alias(f"{col}_score")
 
 
@@ -115,6 +115,7 @@ def compute_ev_scores(run_id: str, output_root: Path) -> EVScores:
 
     arrival_scores = (
         arrivals
+        .filter(pl.col("drive_directly") == False)
         .with_columns([
             (
                 (pl.col("simtime_ms") // snapshot_interval_ms) * snapshot_interval_ms
